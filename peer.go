@@ -4,6 +4,7 @@ import (
 	"github.com/torrance/libtorrent/bitfield"
 	"io"
 	"sync"
+	"time"
 	//"testing/iotest"
 )
 
