@@ -109,7 +109,7 @@ func parsePeerMessage(r io.Reader) (msg interface{}, err error) {
 		return
 	} else if length == 0 {
 		// Keepalive message
-		return
+		return parseKeepaliveMessage(r)
 	} else if length > 131072 {
 		// Set limit at 2^17. Might need to revise this later
 		err = errors.New(fmt.Sprintf("Message size too long: %d", length))
@@ -159,6 +159,19 @@ func parsePeerMessage(r io.Reader) (msg interface{}, err error) {
 	}
 
 	return
+}
+
+type keepaliveMessage struct{}
+
+func parseKeepaliveMessage(r io.Reader) (msg *keepaliveMessage, err error) {
+	msg = new(keepaliveMessage)
+	return
+}
+
+func (msg *keepaliveMessage) BinaryDump(w io.Writer) error {
+	mw := monadWriter{w: w}
+	mw.Write(uint32(0))
+	return mw.err
 }
 
 type chokeMessage struct{}
