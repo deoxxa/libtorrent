@@ -159,8 +159,9 @@ func (tor *Torrent) Start() {
 			case *interestedMessage:
 				logger.Debug("Peer %s has said it is interested", peer.name)
 				peer.SetPeerInterested(true)
-			//case *uninterestedMessage:
-			//	logger.Debug("Peer %s has said it is uninterested", peer.name)
+			case *uninterestedMessage:
+				logger.Debug("Peer %s has said it is uninterested", peer.name)
+				peer.SetPeerInterested(false)
 			case *haveMessage:
 				pieceIndex := int(msg.pieceIndex)
 				logger.Debug("Peer %s has piece %d", peer.name, pieceIndex)
