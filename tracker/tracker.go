@@ -5,12 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/op/go-logging"
 	"io"
 	"math/rand"
 	"net"
 	"net/url"
 	"time"
+
+	"github.com/op/go-logging"
 )
 
 const (
@@ -27,12 +28,12 @@ var logger = logging.MustGetLogger("libtorrent")
 var UDPDialer func(network, address string) (net.Conn, error) = net.Dial
 
 type TorrentStatter interface {
-	InfoHash() []byte
+	InfoHash() [20]byte
+	PeerId() [20]byte
 	Downloaded() int64
 	Uploaded() int64
 	Left() int64
 	Port() uint16
-	PeerId() []byte
 }
 
 type Tracker struct {
@@ -223,8 +224,8 @@ func parseConnectionResponse(r io.Reader) (conRes *connectionResponse, err error
 type announceRequest struct {
 	connectionId  int64
 	transactionId int32
-	infoHash      []byte
-	peerId        []byte
+	infoHash      [20]byte
+	peerId        [20]byte
 	downloaded    int64
 	left          int64
 	uploaded      int64

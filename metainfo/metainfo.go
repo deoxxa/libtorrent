@@ -4,25 +4,26 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"errors"
-	"github.com/zeebo/bencode"
 	"io"
 	"path/filepath"
+
+	"github.com/zeebo/bencode"
 )
 
 type Metainfo struct {
 	Name         string
 	AnnounceList []string
-	Pieces       [][]byte
+	Pieces       [][20]byte
 	PieceCount   int
 	PieceLength  int64
-	InfoHash     []byte
+	InfoHash     [20]byte
 	Files        []struct {
 		Length int64
 		Path   string
 	}
 }
 
-func ParseMetainfo(r io.Reader) (m *Metainfo, err error) {
+func ParseMetainfo(r io.Reader) (*Metainfo, error) {
 	var metaDecode struct {
 		Announce string
 		List     [][]string         `bencode:"announce-list"`
@@ -43,27 +44,26 @@ func ParseMetainfo(r io.Reader) (m *Metainfo, err error) {
 	// of this torrent. Therefore we decode the metainfo in two steps
 	// to obtain both the raw info data and its decoded form.
 	dec := bencode.NewDecoder(r)
-	if err = dec.Decode(&metaDecode); err != nil {
-		return
+	if err := dec.Decode(&metaDecode); err != nil {
+		return nil, err
 	}
 
 	dec = bencode.NewDecoder(bytes.NewReader(metaDecode.RawInfo))
-	if err = dec.Decode(&metaDecode.Info); err != nil {
-		return
+	if err := dec.Decode(&metaDecode.Info); err != nil {
+		return nil, err
 	}
 
 	// Basic error checking
 	if len(metaDecode.Info.Pieces)%20 != 0 {
-		err = errors.New("Metainfo file malformed: Pieces length is not a multiple of 20.")
-		return
+		return nil, errors.New("Metainfo file malformed: Pieces length is not a multiple of 20.")
 	}
 	// TODO: Other error checking
 
 	// Parse metaDecode into metainfo
-	m = &Metainfo{
+	m := &Metainfo{
 		Name:        metaDecode.Info.Name,
 		PieceLength: metaDecode.Info.PieceLength,
-		Pieces:      make([][]byte, len(metaDecode.Info.Pieces)/20),
+		Pieces:      make([][20]byte, len(metaDecode.Info.Pieces)/20),
 		PieceCount:  len(metaDecode.Info.Pieces) / 20,
 	}
 
@@ -85,7 +85,7 @@ func ParseMetainfo(r io.Reader) (m *Metainfo, err error) {
 	// Pieces is a single string of concatenated 20-byte SHA1 hash values for all pieces in the torrent
 	// Cycle through and create an slice of hashes
 	for i := 0; i < len(metaDecode.Info.Pieces)/20; i++ {
-		m.Pieces[i] = metaDecode.Info.Pieces[i*20 : i*20+20]
+		copy(m.Pieces[i][:], metaDecode.Info.Pieces[i*20:i*20+20])
 	}
 
 	// Single files and multiple files are stored differently. We normalise these into
@@ -108,7 +108,8 @@ func ParseMetainfo(r io.Reader) (m *Metainfo, err error) {
 	// Create infohash
 	h := sha1.New()
 	h.Write(metaDecode.RawInfo)
-	m.InfoHash = h.Sum(nil)
+	d := h.Sum(nil)
+	copy(m.InfoHash[:], d)
 
-	return
+	return m, nil
 }

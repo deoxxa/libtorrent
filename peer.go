@@ -1,11 +1,12 @@
 package libtorrent
 
 import (
-	"github.com/torrance/libtorrent/bitfield"
 	"io"
 	"sync"
 	"time"
 	//"testing/iotest"
+
+	"github.com/torrance/libtorrent/bitfield"
 )
 
 type peer struct {
@@ -18,7 +19,7 @@ type peer struct {
 	peerChoking     bool
 	peerInterested  bool
 	mutex           sync.RWMutex
-	bitf            *bitfield.Bitfield
+	bf              *bitfield.Bitfield
 	requesting      int
 	requests        []*requestMessage
 	requestsRunning []*requestMessage
@@ -58,9 +59,8 @@ func newPeer(name string, conn io.ReadWriter, readChan chan peerDouble) (p *peer
 			logger.Info("sending message %#v to %s", msg, p.name)
 
 			if err := msg.BinaryDump(conn); err != nil {
-				// TODO: Close peer
-				logger.Error("%s Received error writing to connection: %s", p.name, err)
-				return
+				logger.Error(err.Error())
+				break
 			}
 		}
 	}()
@@ -143,22 +143,22 @@ func (p *peer) SetPeerInterested(b bool) {
 	p.mutex.Unlock()
 }
 
-func (p *peer) SetBitfield(bitf *bitfield.Bitfield) {
+func (p *peer) SetBitfield(bf *bitfield.Bitfield) {
 	p.mutex.Lock()
-	p.bitf = bitf
+	p.bf = bf
 	p.mutex.Unlock()
 }
 
 func (p *peer) HasPiece(index int) {
 	p.mutex.Lock()
-	p.bitf.SetTrue(index)
+	p.bf.SetTrue(index)
 	p.mutex.Unlock()
 }
 
 func (p *peer) MaybeSendPieceRequests() {
 	p.mutex.Lock()
 
-	for i := len(p.requestsRunning); i < 5; i++ {
+	for i := len(p.requestsRunning); i < 10; i++ {
 		if len(p.requests) == 0 {
 			break
 		}

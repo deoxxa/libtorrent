@@ -5,9 +5,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/torrance/libtorrent/bitfield"
 	"io"
 	"io/ioutil"
+
+	"github.com/torrance/libtorrent/bitfield"
 )
 
 const (
@@ -28,17 +29,16 @@ type binaryDumper interface {
 
 type handshake struct {
 	protocol []byte
-	infoHash []byte
-	peerId   []byte
+	infoHash [20]byte
+	peerId   [20]byte
 }
 
-func newHandshake(infoHash []byte) (hs *handshake) {
-	hs = &handshake{
+func newHandshake(infoHash [20]byte, peerId [20]byte) (hs *handshake) {
+	return &handshake{
 		protocol: []byte("BitTorrent protocol"),
 		infoHash: infoHash,
-		peerId:   PeerId,
+		peerId:   peerId,
 	}
-	return
 }
 
 func parseHandshake(r io.Reader) (hs *handshake, err error) {
@@ -70,18 +70,16 @@ func parseHandshake(r io.Reader) (hs *handshake, err error) {
 	}
 
 	// Info Hash
-	_, err = r.Read(buf)
+	_, err = r.Read(hs.infoHash[:])
 	if err != nil {
 		return
 	}
-	hs.infoHash = append(hs.infoHash, buf...)
 
 	// PeerID
-	_, err = r.Read(buf)
+	_, err = r.Read(hs.peerId[:])
 	if err != nil {
 		return
 	}
-	hs.peerId = append(hs.peerId, buf...)
 
 	return
 }
@@ -98,7 +96,6 @@ func (hs *handshake) BinaryDump(w io.Writer) error {
 
 func (hs *handshake) String() string {
 	return fmt.Sprintf("[Handshake Protocol: %s infoHash: %x peerId: %s]", hs.protocol, hs.infoHash, hs.peerId)
-
 }
 
 func parsePeerMessage(r io.Reader) (msg interface{}, err error) {
@@ -252,21 +249,21 @@ func (msg *haveMessage) BinaryDump(w io.Writer) error {
 }
 
 type bitfieldMessage struct {
-	bitf *bitfield.Bitfield
+	bf *bitfield.Bitfield
 }
 
 func parseBitfieldMessage(r io.Reader) (msg *bitfieldMessage, err error) {
-	bitf, err := bitfield.ParseBitfield(r)
-	msg = &bitfieldMessage{bitf: bitf}
+	bf, err := bitfield.ParseBitfield(r)
+	msg = &bitfieldMessage{bf: bf}
 	return
 }
 
 func (msg *bitfieldMessage) BinaryDump(w io.Writer) error {
-	length := uint32(msg.bitf.ByteLength() + 1)
+	length := uint32(msg.bf.ByteLength() + 1)
 	mw := monadWriter{w: w}
 	mw.Write(length)
 	mw.Write(Bitfield)
-	mw.Write(msg.bitf.Bytes())
+	mw.Write(msg.bf.Bytes())
 	return mw.err
 }
 

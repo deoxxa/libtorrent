@@ -24,10 +24,12 @@ func (l *Listener) AddTorrent(tor *Torrent) {
 	l.torrents[infoHash] = tor
 }
 
-func (l *Listener) Listen() (err error) {
+func (l *Listener) Listen() error {
 	port := fmt.Sprintf(":%d", l.port)
-	if l.listener, err = net.Listen("tcp", port); err != nil {
-		return
+	if listener, err := net.Listen("tcp", port); err != nil {
+		return err
+	} else {
+		l.listener = listener
 	}
 
 	// Begin accepting incoming peers
@@ -35,14 +37,14 @@ func (l *Listener) Listen() (err error) {
 		for {
 			conn, err := l.listener.Accept()
 			if err != nil {
-				logger.Error("Listener unexpectedly quit: %s", err)
-				return
+				logger.Error(err.Error())
+				break
 			}
 
 			go func() {
 				hs, err := parseHandshake(conn)
 				if err != nil {
-					logger.Error("%s Initial handshake failed: %s", conn.RemoteAddr(), err)
+					logger.Error(err.Error())
 					conn.Close()
 					return
 				}
@@ -60,7 +62,7 @@ func (l *Listener) Listen() (err error) {
 		}
 	}()
 
-	return
+	return nil
 }
 
 func (l *Listener) Close() error {
