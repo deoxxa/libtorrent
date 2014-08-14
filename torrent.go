@@ -246,6 +246,10 @@ func (t *Torrent) String() string {
 	return fmt.Sprintf(s, t.meta.InfoHash, t.meta.Name, t.meta.PieceLength, t.meta.AnnounceList)
 }
 
+func (t *Torrent) Name() string {
+	return t.meta.Name
+}
+
 func (t *Torrent) InfoHash() []byte {
 	return t.meta.InfoHash
 }
