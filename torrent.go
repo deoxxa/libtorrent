@@ -299,7 +299,13 @@ func (t *Torrent) Uploaded() int64 {
 
 func (t *Torrent) Left() int64 {
 	// TODO:
-	return 0
+	var r int64
+
+	for _, f := range t.meta.Files {
+		r += f.Length
+	}
+
+	return r
 }
 
 func (t *Torrent) Port() uint16 {
