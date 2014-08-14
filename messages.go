@@ -135,7 +135,7 @@ func parsePeerMessage(r io.Reader) (msg interface{}, err error) {
 	// Read payload (arbitrary size)
 	payload := make([]byte, length-1)
 	if length-1 > 0 {
-		if _, err = r.Read(payload); err != nil {
+		if err = binary.Read(r, binary.BigEndian, payload); err != nil {
 			return
 		}
 	}
