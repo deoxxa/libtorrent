@@ -165,7 +165,7 @@ func (tor *Torrent) Start() {
 					// TODO: Shutdown client
 				}
 				peer.HasPiece(pieceIndex)
-				// TODO: Update swarmTally
+				tor.swarmTally.AddIndex(pieceIndex)
 			case *bitfieldMessage:
 				logger.Debug("Peer %s has sent us its bitfield", peer.name)
 				// Raw parsed bitfield has no actual length. Let's try to set it.
