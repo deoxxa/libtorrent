@@ -31,6 +31,7 @@ type Torrent struct {
 	swarm            []*peer
 	incomingPeer     chan *peer
 	incomingPeerAddr chan string
+	requesting       *bitfield.Bitfield
 	swarmTally       swarmTally
 	readChan         chan peerDouble
 	trackers         []*tracker.Tracker
@@ -69,6 +70,8 @@ func NewTorrent(m *metainfo.Metainfo, config *Config) (tor *Torrent, err error) 
 		logger.Error("Failed to run validation on new filestore: %s", err)
 		return
 	}
+
+	tor.requesting = bitfield.NewBitfield(tor.bitf.Length())
 
 	return
 }
@@ -156,6 +159,7 @@ func (tor *Torrent) Start() {
 			case *unchokeMessage:
 				logger.Debug("Peer %s has unchoked us", peer.name)
 				peer.SetPeerChoking(false)
+				tor.MaybeRequestPieces(peer)
 			case *interestedMessage:
 				logger.Debug("Peer %s has said it is interested", peer.name)
 				peer.SetPeerInterested(true)
@@ -168,9 +172,11 @@ func (tor *Torrent) Start() {
 				if pieceIndex >= tor.meta.PieceCount {
 					logger.Debug("Peer %s sent an out of range have message")
 					// TODO: Shutdown client
+					break
 				}
 				peer.HasPiece(pieceIndex)
 				tor.swarmTally.AddIndex(pieceIndex)
+				tor.MaybeRequestPieces(peer)
 			case *bitfieldMessage:
 				logger.Debug("Peer %s has sent us its bitfield", peer.name)
 				// Raw parsed bitfield has no actual length. Let's try to set it.
@@ -181,6 +187,7 @@ func (tor *Torrent) Start() {
 				}
 				peer.SetBitfield(msg.bitf)
 				tor.swarmTally.AddBitfield(msg.bitf)
+				tor.MaybeRequestPieces(peer)
 			case *requestMessage:
 				if peer.GetAmChoking() || !tor.bitf.Get(int(msg.pieceIndex)) || msg.blockLength > 32768 {
 					logger.Debug("Peer %s has asked for a block (%d, %d, %d), but we are rejecting them", peer.name, msg.pieceIndex, msg.blockOffset, msg.blockLength)
@@ -199,8 +206,31 @@ func (tor *Torrent) Start() {
 					blockOffset: msg.blockOffset,
 					data:        block,
 				}
-				// case *pieceMessage:
-				// case *cancelMessage:
+			case *pieceMessage:
+				valid := false
+				for i, request := range peer.requestsRunning {
+					if request.pieceIndex == msg.pieceIndex && request.blockOffset == msg.blockOffset && int(request.blockLength) == len(msg.data) {
+						valid = true
+						copy(peer.requestsRunning[i:], peer.requestsRunning[i+1:])
+						peer.requestsRunning[len(peer.requestsRunning)-1] = nil
+						peer.requestsRunning = peer.requestsRunning[:len(peer.requestsRunning)-1]
+						break
+					}
+				}
+
+				if !valid {
+					logger.Debug("Peer %s sent us a piece (%d, %d - %d) that we don't have a corresponding request for", peer.name, msg.pieceIndex, msg.blockOffset, int(msg.blockOffset)+len(msg.data))
+				} else {
+					logger.Debug("Peer %s sent us a piece (%d, %d - %d)", peer.name, msg.pieceIndex, msg.blockOffset, int(msg.blockOffset)+len(msg.data))
+				}
+
+				if len(peer.requests)+len(peer.requestsRunning) == 0 {
+					peer.requesting = -1
+					tor.MaybeRequestPieces(peer)
+				} else {
+					peer.MaybeSendPieceRequests()
+				}
+			// case *cancelMessage:
 			default:
 				logger.Debug("Peer %s sent unknown message", peer.name)
 			}
@@ -278,4 +308,41 @@ func (t *Torrent) Port() uint16 {
 
 func (t *Torrent) PeerId() []byte {
 	return PeerId
+}
+
+func (t *Torrent) MaybeRequestPieces(p *peer) {
+	if p.bitf == nil {
+		return
+	}
+
+	for i := 0; i < t.bitf.Length(); i++ {
+		if t.bitf.Get(i) || !p.bitf.Get(i) {
+			continue
+		}
+
+		if p.SetAmInterested(true) {
+			p.write <- &interestedMessage{}
+		}
+
+		if p.GetPeerChoking() {
+			break
+		}
+
+		if p.requesting != -1 {
+			break
+		}
+
+		t.requesting.SetTrue(i)
+		p.requesting = i
+
+		for o := 0; o < int(t.meta.PieceLength/8192); o++ {
+			p.requests = append(p.requests, &requestMessage{
+				pieceIndex:  uint32(i),
+				blockOffset: uint32(o * 8192),
+				blockLength: 8192,
+			})
+		}
+
+		p.MaybeSendPieceRequests()
+	}
 }

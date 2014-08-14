@@ -9,16 +9,19 @@ import (
 )
 
 type peer struct {
-	name           string
-	conn           io.ReadWriter
-	write          chan binaryDumper
-	read           chan peerDouble
-	amChoking      bool
-	amInterested   bool
-	peerChoking    bool
-	peerInterested bool
-	mutex          sync.RWMutex
-	bitf           *bitfield.Bitfield
+	name            string
+	conn            io.ReadWriter
+	write           chan binaryDumper
+	read            chan peerDouble
+	amChoking       bool
+	amInterested    bool
+	peerChoking     bool
+	peerInterested  bool
+	mutex           sync.RWMutex
+	bitf            *bitfield.Bitfield
+	requesting      int
+	requests        []*requestMessage
+	requestsRunning []*requestMessage
 }
 
 type peerDouble struct {
@@ -36,6 +39,7 @@ func newPeer(name string, conn io.ReadWriter, readChan chan peerDouble) (p *peer
 		amInterested:   false,
 		peerChoking:    true,
 		peerInterested: false,
+		requesting:     -1,
 	}
 
 	// Write loop
@@ -50,6 +54,8 @@ func newPeer(name string, conn io.ReadWriter, readChan chan peerDouble) (p *peer
 			case <-time.After(time.Second * 5):
 				msg = new(keepaliveMessage)
 			}
+
+			logger.Info("sending message %#v to %s", msg, p.name)
 
 			if err := msg.BinaryDump(conn); err != nil {
 				// TODO: Close peer
@@ -96,6 +102,28 @@ func (p *peer) SetAmChoking(b bool) (changed bool) {
 	return
 }
 
+func (p *peer) GetAmInterested() (b bool) {
+	p.mutex.RLock()
+	b = p.amInterested
+	p.mutex.RUnlock()
+	return
+}
+
+func (p *peer) SetAmInterested(b bool) (changed bool) {
+	p.mutex.Lock()
+	changed = p.amInterested != b
+	p.amInterested = b
+	p.mutex.Unlock()
+	return
+}
+
+func (p *peer) GetPeerChoking() (b bool) {
+	p.mutex.RLock()
+	b = p.peerChoking
+	p.mutex.RUnlock()
+	return
+}
+
 func (p *peer) SetPeerChoking(b bool) {
 	p.mutex.Lock()
 	p.peerChoking = b
@@ -124,5 +152,24 @@ func (p *peer) SetBitfield(bitf *bitfield.Bitfield) {
 func (p *peer) HasPiece(index int) {
 	p.mutex.Lock()
 	p.bitf.SetTrue(index)
+	p.mutex.Unlock()
+}
+
+func (p *peer) MaybeSendPieceRequests() {
+	p.mutex.Lock()
+
+	for i := len(p.requestsRunning); i < 5; i++ {
+		if len(p.requests) == 0 {
+			break
+		}
+
+		p.write <- p.requests[0]
+
+		p.requestsRunning = append(p.requestsRunning, p.requests[0])
+
+		p.requests[0] = nil
+		p.requests = p.requests[1:]
+	}
+
 	p.mutex.Unlock()
 }
