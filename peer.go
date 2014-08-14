@@ -41,8 +41,15 @@ func newPeer(name string, conn io.ReadWriter, readChan chan peerDouble) (p *peer
 	go func() {
 		for {
 			//conn := iotest.NewWriteLogger("Writing", conn)
-			// TODO: send regular keep alive requests
-			msg := <-p.write
+			var msg binaryDumper
+
+			select {
+			case _msg := <-p.write:
+				msg = _msg
+			case <-time.After(time.Second * 5):
+				msg = new(keepaliveMessage)
+			}
+
 			if err := msg.BinaryDump(conn); err != nil {
 				// TODO: Close peer
 				logger.Error("%s Received error writing to connection: %s", p.name, err)
