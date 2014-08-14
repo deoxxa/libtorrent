@@ -148,6 +148,8 @@ func (tor *Torrent) Start() {
 			msg := peerDouble.msg
 
 			switch msg := msg.(type) {
+			case *keepaliveMessage:
+				logger.Debug("Peer %s sent a keepalive message", peer.name)
 			case *chokeMessage:
 				logger.Debug("Peer %s has choked us", peer.name)
 				peer.SetPeerChoking(true)
