@@ -73,6 +73,7 @@ func newPeer(name string, conn io.ReadWriter, readChan chan peerDouble) (p *peer
 				logger.Debug("%s Received error reading connection: %s", p.name, err)
 				break
 			}
+
 			readChan <- peerDouble{msg: msg, peer: p}
 		}
 	}()
