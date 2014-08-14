@@ -148,6 +148,8 @@ func parsePeerMessage(r io.Reader) (msg interface{}, err error) {
 		return parseUnchokeMessage(payloadReader)
 	case Interested:
 		return parseInterestedMessage(payloadReader)
+	case Uninterested:
+		return parseUninterestedMessage(payloadReader)
 	case Have:
 		return parseHaveMessage(payloadReader)
 	case Bitfield:
@@ -213,6 +215,20 @@ func (msg *interestedMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(1))
 	mw.Write(Interested)
+	return mw.err
+}
+
+type uninterestedMessage struct{}
+
+func parseUninterestedMessage(r io.Reader) (msg *uninterestedMessage, err error) {
+	msg = new(uninterestedMessage)
+	return
+}
+
+func (msg *uninterestedMessage) BinaryDump(w io.Writer) error {
+	mw := monadWriter{w: w}
+	mw.Write(uint32(1))
+	mw.Write(Uninterested)
 	return mw.err
 }
 
