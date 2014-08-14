@@ -130,8 +130,10 @@ func (tor *Torrent) Start() {
 				for _, peer := range tor.swarm {
 					if peer.GetPeerInterested() && peer.GetAmChoking() {
 						logger.Debug("Unchoking peer %s", peer.name)
-						peer.write <- &unchokeMessage{}
-						peer.SetAmChoking(false)
+
+						if peer.SetAmChoking(false) {
+							peer.write <- &unchokeMessage{}
+						}
 					}
 				}
 			}

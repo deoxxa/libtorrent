@@ -87,10 +87,12 @@ func (p *peer) GetAmChoking() (b bool) {
 	return
 }
 
-func (p *peer) SetAmChoking(b bool) {
+func (p *peer) SetAmChoking(b bool) (changed bool) {
 	p.mutex.Lock()
+	changed = p.amChoking != b
 	p.amChoking = b
 	p.mutex.Unlock()
+	return
 }
 
 func (p *peer) SetPeerChoking(b bool) {
