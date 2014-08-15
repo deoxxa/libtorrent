@@ -7,21 +7,21 @@ import (
 
 type Listener struct {
 	port     uint16
-	torrents map[string]*Torrent
+	sessions map[string]*Session
 	listener net.Listener
 }
 
 func NewListener(port uint16) (l *Listener) {
 	l = &Listener{
 		port:     port,
-		torrents: make(map[string]*Torrent),
+		sessions: make(map[string]*Session),
 	}
 	return
 }
 
-func (l *Listener) AddTorrent(tor *Torrent) {
+func (l *Listener) AddSession(tor *Session) {
 	infoHash := fmt.Sprintf("%x", tor.InfoHash())
-	l.torrents[infoHash] = tor
+	l.sessions[infoHash] = tor
 }
 
 func (l *Listener) Listen() error {
@@ -50,7 +50,7 @@ func (l *Listener) Listen() error {
 				}
 
 				infoHash := fmt.Sprintf("%x", hs.infoHash)
-				if tor, ok := l.torrents[infoHash]; ok {
+				if tor, ok := l.sessions[infoHash]; ok {
 					logger.Debug("%s Incoming peer connection: %s", conn.RemoteAddr(), hs.peerId)
 					tor.AddPeer(conn, hs)
 				} else {

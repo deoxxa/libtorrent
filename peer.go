@@ -6,23 +6,33 @@ import (
 	"time"
 	//"testing/iotest"
 
+	"github.com/ReSc/c3"
 	"github.com/torrance/libtorrent/bitfield"
 )
 
 type peer struct {
-	name            string
-	conn            io.ReadWriter
-	write           chan binaryDumper
-	read            chan peerDouble
-	amChoking       bool
-	amInterested    bool
-	peerChoking     bool
-	peerInterested  bool
-	mutex           sync.RWMutex
-	bf              *bitfield.Bitfield
-	requesting      int
-	requests        []*requestMessage
-	requestsRunning []*requestMessage
+	peerId        [20]byte
+	reserved      [8]byte
+	hasExtensions bool
+	extensions    map[int]string
+
+	amChoking      bool
+	amInterested   bool
+	peerChoking    bool
+	peerInterested bool
+
+	conn  io.ReadWriter
+	write chan binaryDumper
+	read  chan peerDouble
+
+	mutex sync.RWMutex
+
+	blocks *bitfield.Bitfield
+
+	maxRequests     int
+	requestingBlock int
+	requestQueue    c3.Queue
+	requestsRunning c3.Bag
 }
 
 type peerDouble struct {
@@ -30,17 +40,25 @@ type peerDouble struct {
 	peer *peer
 }
 
-func newPeer(name string, conn io.ReadWriter, readChan chan peerDouble) (p *peer) {
+func newPeer(hs *handshake, conn io.ReadWriter, readChan chan peerDouble) (p *peer) {
 	p = &peer{
-		name:           name,
-		conn:           conn,
-		write:          make(chan binaryDumper, 10),
-		read:           readChan,
+		peerId:        hs.peerId,
+		hasExtensions: hs.flags.Element(20) == 1,
+		extensions:    map[int]string{},
+
 		amChoking:      true,
 		amInterested:   false,
 		peerChoking:    true,
 		peerInterested: false,
-		requesting:     -1,
+
+		conn:  conn,
+		write: make(chan binaryDumper, 10),
+		read:  readChan,
+
+		maxRequests:     25,
+		requestingBlock: -1,
+		requestQueue:    c3.NewQueue(),
+		requestsRunning: c3.NewBag(),
 	}
 
 	// Write loop
@@ -55,8 +73,6 @@ func newPeer(name string, conn io.ReadWriter, readChan chan peerDouble) (p *peer
 			case <-time.After(time.Second * 5):
 				msg = new(keepaliveMessage)
 			}
-
-			logger.Info("sending message %#v to %s", msg, p.name)
 
 			if err := msg.BinaryDump(conn); err != nil {
 				logger.Error(err.Error())
@@ -76,7 +92,7 @@ func newPeer(name string, conn io.ReadWriter, readChan chan peerDouble) (p *peer
 				logger.Info(err.Error())
 			} else if err != nil {
 				// TODO: Close peer
-				logger.Debug("%s Received error reading connection: %s", p.name, err)
+				logger.Debug("%s Received error reading connection: %s", p.peerId, err)
 				break
 			}
 
@@ -143,32 +159,39 @@ func (p *peer) SetPeerInterested(b bool) {
 	p.mutex.Unlock()
 }
 
-func (p *peer) SetBitfield(bf *bitfield.Bitfield) {
+func (p *peer) SetBitfield(blocks *bitfield.Bitfield) {
 	p.mutex.Lock()
-	p.bf = bf
+	p.blocks = blocks
 	p.mutex.Unlock()
 }
 
 func (p *peer) HasPiece(index int) {
 	p.mutex.Lock()
-	p.bf.SetTrue(index)
+	p.blocks.Set(index, true)
 	p.mutex.Unlock()
 }
 
 func (p *peer) MaybeSendPieceRequests() {
 	p.mutex.Lock()
 
-	for i := len(p.requestsRunning); i < 10; i++ {
-		if len(p.requests) == 0 {
+	for {
+		if p.requestsRunning.Len() >= p.maxRequests {
 			break
 		}
 
-		p.write <- p.requests[0]
+		rr, ok := p.requestQueue.Dequeue()
+		if !ok {
+			break
+		}
 
-		p.requestsRunning = append(p.requestsRunning, p.requests[0])
+		r, ok := rr.(*requestMessage)
+		if !ok {
+			break
+		}
 
-		p.requests[0] = nil
-		p.requests = p.requests[1:]
+		p.requestsRunning.Add(*r)
+
+		p.write <- r
 	}
 
 	p.mutex.Unlock()

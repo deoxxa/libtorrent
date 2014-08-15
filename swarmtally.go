@@ -19,7 +19,7 @@ func (st swarmTally) AddBitfield(bitf *bitfield.Bitfield) (err error) {
 			// We have this piece.
 			continue
 		}
-		if bitf.Get(i) {
+		if bitf.Element(i) == 1 {
 			st[i]++
 		}
 	}
@@ -50,7 +50,8 @@ func (st swarmTally) RemoveBitfield(bitf *bitfield.Bitfield) (err error) {
 			// We either have this piece, or something's gone wrong. Either way, leave as is.
 			continue
 		}
-		if bitf.Get(i) {
+
+		if bitf.Element(i) == 1 {
 			st[i]--
 		}
 	}

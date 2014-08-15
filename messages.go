@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 
 	"github.com/torrance/libtorrent/bitfield"
 )
@@ -29,6 +30,7 @@ type binaryDumper interface {
 
 type handshake struct {
 	protocol []byte
+	flags    *bitfield.Bitfield
 	infoHash [20]byte
 	peerId   [20]byte
 }
@@ -36,6 +38,7 @@ type handshake struct {
 func newHandshake(infoHash [20]byte, peerId [20]byte) (hs *handshake) {
 	return &handshake{
 		protocol: []byte("BitTorrent protocol"),
+		flags:    bitfield.NewBitfield(nil, 64),
 		infoHash: infoHash,
 		peerId:   peerId,
 	}
@@ -63,11 +66,13 @@ func parseHandshake(r io.Reader) (hs *handshake, err error) {
 	}
 	hs.protocol = append(hs.protocol, buf[0:19]...)
 
-	// Skip reserved bytes
-	_, err = r.Read(buf[0:8])
+	// Reserved bits
+	reserved := make([]byte, 8)
+	_, err = r.Read(reserved)
 	if err != nil {
 		return
 	}
+	hs.flags = bitfield.NewBitfield(reserved, 64)
 
 	// Info Hash
 	_, err = r.Read(hs.infoHash[:])
@@ -86,11 +91,11 @@ func parseHandshake(r io.Reader) (hs *handshake, err error) {
 
 func (hs *handshake) BinaryDump(w io.Writer) error {
 	mw := &monadWriter{w: w}
-	mw.Write(uint8(19))       // Name length
-	mw.Write(hs.protocol)     // Protocol name
-	mw.Write(make([]byte, 8)) // Reserved 8 bytes
-	mw.Write(hs.infoHash)     // InfoHash
-	mw.Write(hs.peerId)       // PeerId
+	mw.Write(uint8(19))        // Name length
+	mw.Write(hs.protocol)      // Protocol name
+	mw.Write(hs.flags.Bytes()) // Reserved 8 bytes
+	mw.Write(hs.infoHash)      // InfoHash
+	mw.Write(hs.peerId)        // PeerId
 	return mw.err
 }
 
@@ -249,21 +254,26 @@ func (msg *haveMessage) BinaryDump(w io.Writer) error {
 }
 
 type bitfieldMessage struct {
-	bf *bitfield.Bitfield
+	blocks *bitfield.Bitfield
 }
 
 func parseBitfieldMessage(r io.Reader) (msg *bitfieldMessage, err error) {
-	bf, err := bitfield.ParseBitfield(r)
-	msg = &bitfieldMessage{bf: bf}
-	return
+	if data, err := ioutil.ReadAll(r); err != nil {
+		return nil, err
+	} else {
+		msg = &bitfieldMessage{
+			blocks: bitfield.NewBitfield(data, len(data)*8),
+		}
+
+		return msg, nil
+	}
 }
 
 func (msg *bitfieldMessage) BinaryDump(w io.Writer) error {
-	length := uint32(msg.bf.ByteLength() + 1)
 	mw := monadWriter{w: w}
-	mw.Write(length)
+	mw.Write(uint32(math.Ceil(float64(msg.blocks.Length())/8) + 1))
 	mw.Write(Bitfield)
-	mw.Write(msg.bf.Bytes())
+	mw.Write(msg.blocks.Bytes())
 	return mw.err
 }
 

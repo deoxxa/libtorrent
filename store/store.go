@@ -41,16 +41,16 @@ func ValidateBlock(s Store, index int) (ok bool, err error) {
 	return bytes.Equal(h.Sum(nil), hash[:]), nil
 }
 
-func Validate(s Store) (bf *bitfield.Bitfield, err error) {
-	bf = bitfield.NewBitfield(s.Blocks())
+func Validate(s Store) (*bitfield.Bitfield, error) {
+	bv := bitfield.NewBitfield(nil, s.Blocks())
 
 	for i := 0; i < s.Blocks(); i++ {
 		if ok, err := ValidateBlock(s, i); err != nil {
 			return nil, err
 		} else if ok {
-			bf.SetTrue(i)
+			bv.Set(i, true)
 		}
 	}
 
-	return bf, nil
+	return bv, nil
 }
