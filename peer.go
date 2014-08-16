@@ -4,13 +4,20 @@ import (
 	"io"
 	"sync"
 	"time"
-	//"testing/iotest"
 
 	"github.com/ReSc/c3"
+	"github.com/facebookgo/stackerr"
 	"github.com/torrance/libtorrent/bitfield"
 )
 
-type peer struct {
+type Peer struct {
+	Errors   chan error
+	Incoming chan interface{}
+	Outgoing chan binaryDumper
+
+	conn io.ReadWriter
+	addr string
+
 	peerId        [20]byte
 	reserved      [8]byte
 	hasExtensions bool
@@ -20,10 +27,6 @@ type peer struct {
 	amInterested   bool
 	peerChoking    bool
 	peerInterested bool
-
-	conn  io.ReadWriter
-	write chan binaryDumper
-	read  chan peerDouble
 
 	mutex sync.RWMutex
 
@@ -35,25 +38,23 @@ type peer struct {
 	requestsRunning c3.Bag
 }
 
-type peerDouble struct {
-	msg  interface{}
-	peer *peer
-}
+func NewPeer(addr string, hs *handshake, conn io.ReadWriter) (p *Peer) {
+	p = &Peer{
+		Errors:   make(chan error, 100),
+		Incoming: make(chan interface{}, 10),
+		Outgoing: make(chan binaryDumper, 10),
 
-func newPeer(hs *handshake, conn io.ReadWriter, readChan chan peerDouble) (p *peer) {
-	p = &peer{
+		addr: addr,
+		conn: conn,
+
 		peerId:        hs.peerId,
-		hasExtensions: hs.flags.Element(20) == 1,
+		hasExtensions: hs.flags.Get(20),
 		extensions:    map[int]string{},
 
 		amChoking:      true,
 		amInterested:   false,
 		peerChoking:    true,
 		peerInterested: false,
-
-		conn:  conn,
-		write: make(chan binaryDumper, 10),
-		read:  readChan,
 
 		maxRequests:     25,
 		requestingBlock: -1,
@@ -64,18 +65,17 @@ func newPeer(hs *handshake, conn io.ReadWriter, readChan chan peerDouble) (p *pe
 	// Write loop
 	go func() {
 		for {
-			//conn := iotest.NewWriteLogger("Writing", conn)
 			var msg binaryDumper
 
 			select {
-			case _msg := <-p.write:
+			case _msg := <-p.Outgoing:
 				msg = _msg
-			case <-time.After(time.Second * 5):
+			case <-time.After(time.Second * 30):
 				msg = new(keepaliveMessage)
 			}
 
 			if err := msg.BinaryDump(conn); err != nil {
-				logger.Error(err.Error())
+				p.Errors <- stackerr.Wrap(err)
 				break
 			}
 		}
@@ -84,33 +84,25 @@ func newPeer(hs *handshake, conn io.ReadWriter, readChan chan peerDouble) (p *pe
 	// Read loop
 	go func() {
 		for {
-			//conn := iotest.NewReadLogger("Reading", conn)
-			msg, err := parsePeerMessage(conn)
-
-			if _, ok := err.(unknownMessage); ok {
-				// Log unknown messages and then ignore
-				logger.Info(err.Error())
-			} else if err != nil {
-				// TODO: Close peer
-				logger.Debug("%s Received error reading connection: %s", p.peerId, err)
-				break
+			if msg, err := parsePeerMessage(conn); err != nil {
+				p.Errors <- err
+			} else {
+				p.Incoming <- msg
 			}
-
-			readChan <- peerDouble{msg: msg, peer: p}
 		}
 	}()
 
 	return
 }
 
-func (p *peer) GetAmChoking() (b bool) {
+func (p *Peer) GetAmChoking() (b bool) {
 	p.mutex.RLock()
 	b = p.amChoking
 	p.mutex.RUnlock()
 	return
 }
 
-func (p *peer) SetAmChoking(b bool) (changed bool) {
+func (p *Peer) SetAmChoking(b bool) (changed bool) {
 	p.mutex.Lock()
 	changed = p.amChoking != b
 	p.amChoking = b
@@ -118,14 +110,14 @@ func (p *peer) SetAmChoking(b bool) (changed bool) {
 	return
 }
 
-func (p *peer) GetAmInterested() (b bool) {
+func (p *Peer) GetAmInterested() (b bool) {
 	p.mutex.RLock()
 	b = p.amInterested
 	p.mutex.RUnlock()
 	return
 }
 
-func (p *peer) SetAmInterested(b bool) (changed bool) {
+func (p *Peer) SetAmInterested(b bool) (changed bool) {
 	p.mutex.Lock()
 	changed = p.amInterested != b
 	p.amInterested = b
@@ -133,45 +125,45 @@ func (p *peer) SetAmInterested(b bool) (changed bool) {
 	return
 }
 
-func (p *peer) GetPeerChoking() (b bool) {
+func (p *Peer) GetPeerChoking() (b bool) {
 	p.mutex.RLock()
 	b = p.peerChoking
 	p.mutex.RUnlock()
 	return
 }
 
-func (p *peer) SetPeerChoking(b bool) {
+func (p *Peer) SetPeerChoking(b bool) {
 	p.mutex.Lock()
 	p.peerChoking = b
 	p.mutex.Unlock()
 }
 
-func (p *peer) GetPeerInterested() (b bool) {
+func (p *Peer) GetPeerInterested() (b bool) {
 	p.mutex.RLock()
 	b = p.peerInterested
 	p.mutex.RUnlock()
 	return
 }
 
-func (p *peer) SetPeerInterested(b bool) {
+func (p *Peer) SetPeerInterested(b bool) {
 	p.mutex.Lock()
 	p.peerInterested = b
 	p.mutex.Unlock()
 }
 
-func (p *peer) SetBitfield(blocks *bitfield.Bitfield) {
+func (p *Peer) SetBitfield(blocks *bitfield.Bitfield) {
 	p.mutex.Lock()
 	p.blocks = blocks
 	p.mutex.Unlock()
 }
 
-func (p *peer) HasPiece(index int) {
+func (p *Peer) HasPiece(index int) {
 	p.mutex.Lock()
 	p.blocks.Set(index, true)
 	p.mutex.Unlock()
 }
 
-func (p *peer) MaybeSendPieceRequests() {
+func (p *Peer) MaybeSendPieceRequests() {
 	p.mutex.Lock()
 
 	for {
@@ -191,7 +183,7 @@ func (p *peer) MaybeSendPieceRequests() {
 
 		p.requestsRunning.Add(*r)
 
-		p.write <- r
+		p.Outgoing <- r
 	}
 
 	p.mutex.Unlock()

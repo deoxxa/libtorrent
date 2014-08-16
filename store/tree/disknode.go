@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/facebookgo/stackerr"
 )
 
 type DiskNodeConfig struct {
@@ -30,7 +32,7 @@ func NewDiskNode(name string, length int64, config interface{}) (Node, error) {
 	// Root directory must already exist
 	baseFileInfo, err := os.Stat(c.Base)
 	if err != nil {
-		return nil, err
+		return nil, stackerr.Wrap(err)
 	}
 	if !baseFileInfo.IsDir() {
 		return nil, errors.New(c.Base + " is not a directory")
@@ -41,7 +43,7 @@ func NewDiskNode(name string, length int64, config interface{}) (Node, error) {
 	// Create any required parent directories
 	dirs := filepath.Dir(absPath)
 	if err = os.MkdirAll(dirs, 0755); err != nil {
-		return nil, err
+		return nil, stackerr.Wrap(err)
 	}
 
 	// Create or open file
@@ -50,7 +52,7 @@ func NewDiskNode(name string, length int64, config interface{}) (Node, error) {
 	// Stat for size of file
 	stat, err := fd.Stat()
 	if err != nil {
-		return nil, err
+		return nil, stackerr.Wrap(err)
 	}
 	if length-stat.Size() < 0 {
 		return nil, errors.New("Node already exists and is larger than expected size. Aborting.")
@@ -59,7 +61,7 @@ func NewDiskNode(name string, length int64, config interface{}) (Node, error) {
 	// Now pad the file from the end until it matches required size
 	err = fd.Truncate(length)
 	if err != nil {
-		return nil, err
+		return nil, stackerr.Wrap(err)
 	}
 
 	file := &DiskNode{

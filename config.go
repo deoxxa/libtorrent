@@ -5,9 +5,11 @@ import (
 )
 
 type Config struct {
-	Port         uint16
-	PeerId       [20]byte
-	InfoHash     [20]byte
-	Name         string
-	StoreFactory store.Factory
+	InfoHash            [20]byte
+	PeerId              [20]byte
+	IP                  [4]byte
+	Port                uint16
+	Name                string
+	StoreFactory        store.Factory
+	PeerSourceFactories []PeerSourceFactory
 }

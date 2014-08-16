@@ -3,12 +3,12 @@ package libtorrent
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"math"
 
+	"github.com/facebookgo/stackerr"
 	"github.com/torrance/libtorrent/bitfield"
 )
 
@@ -44,49 +44,43 @@ func newHandshake(infoHash [20]byte, peerId [20]byte) (hs *handshake) {
 	}
 }
 
-func parseHandshake(r io.Reader) (hs *handshake, err error) {
+func parseHandshake(r io.Reader) (*handshake, error) {
 	buf := make([]byte, 20)
-	hs = new(handshake)
+	hs := new(handshake)
 
 	// Name length
-	_, err = r.Read(buf[0:1])
-	if err != nil {
-		return
+	if _, err := r.Read(buf[0:1]); err != nil {
+		return nil, stackerr.Wrap(err)
 	} else if int(buf[0]) != 19 {
-		err = errors.New("Handshake halted: name length was not 19")
-		return
+		return nil, stackerr.New("Handshake halted: name length was not 19")
 	}
 
 	// Protocol
-	_, err = r.Read(buf[0:19])
-	if err != nil {
-		return
+	if _, err := r.Read(buf[0:19]); err != nil {
+		return nil, stackerr.Wrap(err)
 	} else if !bytes.Equal(buf[0:19], []byte("BitTorrent protocol")) {
-		err = errors.New(fmt.Sprintf("Handshake halted: incompatible protocol: %s", buf[0:19]))
+		return nil, stackerr.Newf("Handshake halted: incompatible protocol: %s", buf[0:19])
 	}
 	hs.protocol = append(hs.protocol, buf[0:19]...)
 
 	// Reserved bits
 	reserved := make([]byte, 8)
-	_, err = r.Read(reserved)
-	if err != nil {
-		return
+	if _, err := r.Read(reserved); err != nil {
+		return nil, stackerr.Wrap(err)
 	}
 	hs.flags = bitfield.NewBitfield(reserved, 64)
 
 	// Info Hash
-	_, err = r.Read(hs.infoHash[:])
-	if err != nil {
-		return
+	if _, err := r.Read(hs.infoHash[:]); err != nil {
+		return nil, stackerr.Wrap(err)
 	}
 
 	// PeerID
-	_, err = r.Read(hs.peerId[:])
-	if err != nil {
-		return
+	if _, err := r.Read(hs.peerId[:]); err != nil {
+		return nil, stackerr.Wrap(err)
 	}
 
-	return
+	return hs, nil
 }
 
 func (hs *handshake) BinaryDump(w io.Writer) error {
@@ -96,49 +90,42 @@ func (hs *handshake) BinaryDump(w io.Writer) error {
 	mw.Write(hs.flags.Bytes()) // Reserved 8 bytes
 	mw.Write(hs.infoHash)      // InfoHash
 	mw.Write(hs.peerId)        // PeerId
-	return mw.err
+
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
 }
 
 func (hs *handshake) String() string {
 	return fmt.Sprintf("[Handshake Protocol: %s infoHash: %x peerId: %s]", hs.protocol, hs.infoHash, hs.peerId)
 }
 
-func parsePeerMessage(r io.Reader) (msg interface{}, err error) {
+func parsePeerMessage(r io.Reader) (interface{}, error) {
 	// Read message length (4 bytes)
 	var length uint32
-	err = binary.Read(r, binary.BigEndian, &length)
-	if err != nil {
-		return
+	if err := binary.Read(r, binary.BigEndian, &length); err != nil {
+		return nil, stackerr.Wrap(err)
 	} else if length == 0 {
 		// Keepalive message
 		return parseKeepaliveMessage(r)
 	} else if length > 131072 {
 		// Set limit at 2^17. Might need to revise this later
-		err = errors.New(fmt.Sprintf("Message size too long: %d", length))
-		return
+		return nil, stackerr.Newf("Message size too long: %d", length)
 	}
 
 	// Read message id (1 byte)
 	var id uint8
-	err = binary.Read(r, binary.BigEndian, &id)
-	if err != nil {
-		return
-	} else if id > Cancel {
-		// Return error on unknown messages
-		discard := make([]byte, length-1)
-		_, err = r.Read(discard)
-		if err != nil {
-			return
-		}
-		err = unknownMessage{id: id, length: length}
-		return
+	if err := binary.Read(r, binary.BigEndian, &id); err != nil {
+		return nil, stackerr.Wrap(err)
 	}
 
 	// Read payload (arbitrary size)
 	payload := make([]byte, length-1)
 	if length-1 > 0 {
-		if err = binary.Read(r, binary.BigEndian, payload); err != nil {
-			return
+		if err := binary.Read(r, binary.BigEndian, payload); err != nil {
+			return nil, stackerr.Wrap(err)
 		}
 	}
 	payloadReader := bytes.NewReader(payload)
@@ -162,87 +149,111 @@ func parsePeerMessage(r io.Reader) (msg interface{}, err error) {
 		return parsePieceMessage(payloadReader)
 	}
 
-	return
+	return nil, stackerr.Wrap(unknownMessage{id: id, length: length})
 }
 
 type keepaliveMessage struct{}
 
-func parseKeepaliveMessage(r io.Reader) (msg *keepaliveMessage, err error) {
-	msg = new(keepaliveMessage)
-	return
+func parseKeepaliveMessage(r io.Reader) (*keepaliveMessage, error) {
+	return new(keepaliveMessage), nil
 }
 
 func (msg *keepaliveMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(0))
-	return mw.err
+
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
 }
 
 type chokeMessage struct{}
 
-func parseChokeMessage(r io.Reader) (msg *chokeMessage, err error) {
-	msg = new(chokeMessage)
-	return
+func parseChokeMessage(r io.Reader) (*chokeMessage, error) {
+	return new(chokeMessage), nil
 }
 
 func (msg *chokeMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(1))
 	mw.Write(Choke)
-	return mw.err
+
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
 }
 
 type unchokeMessage struct{}
 
-func parseUnchokeMessage(r io.Reader) (msg *unchokeMessage, err error) {
-	msg = new(unchokeMessage)
-	return
+func parseUnchokeMessage(r io.Reader) (*unchokeMessage, error) {
+	return new(unchokeMessage), nil
 }
 
 func (msg *unchokeMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(1))
 	mw.Write(Unchoke)
-	return mw.err
+
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
 }
 
 type interestedMessage struct{}
 
-func parseInterestedMessage(r io.Reader) (msg *interestedMessage, err error) {
-	msg = new(interestedMessage)
-	return
+func parseInterestedMessage(r io.Reader) (*interestedMessage, error) {
+	return new(interestedMessage), nil
 }
 
 func (msg *interestedMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(1))
 	mw.Write(Interested)
-	return mw.err
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
 }
 
 type uninterestedMessage struct{}
 
-func parseUninterestedMessage(r io.Reader) (msg *uninterestedMessage, err error) {
-	msg = new(uninterestedMessage)
-	return
+func parseUninterestedMessage(r io.Reader) (*uninterestedMessage, error) {
+	return new(uninterestedMessage), nil
 }
 
 func (msg *uninterestedMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(1))
 	mw.Write(Uninterested)
-	return mw.err
+
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
 }
 
 type haveMessage struct {
 	pieceIndex uint32
 }
 
-func parseHaveMessage(r io.Reader) (msg *haveMessage, err error) {
-	msg = new(haveMessage)
-	mw := monadReader{r: r}
-	mw.Read(&msg.pieceIndex)
-	return msg, mw.err
+func parseHaveMessage(r io.Reader) (*haveMessage, error) {
+	msg := new(haveMessage)
+	mr := monadReader{r: r}
+	mr.Read(&msg.pieceIndex)
+
+	if mr.err == nil {
+		return msg, nil
+	} else {
+		return nil, stackerr.Wrap(mr.err)
+	}
 }
 
 func (msg *haveMessage) BinaryDump(w io.Writer) error {
@@ -250,7 +261,11 @@ func (msg *haveMessage) BinaryDump(w io.Writer) error {
 	mw.Write(uint32(5))
 	mw.Write(Have)
 	mw.Write(msg.pieceIndex)
-	return mw.err
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
 }
 
 type bitfieldMessage struct {
@@ -259,7 +274,7 @@ type bitfieldMessage struct {
 
 func parseBitfieldMessage(r io.Reader) (msg *bitfieldMessage, err error) {
 	if data, err := ioutil.ReadAll(r); err != nil {
-		return nil, err
+		return nil, stackerr.Wrap(err)
 	} else {
 		msg = &bitfieldMessage{
 			blocks: bitfield.NewBitfield(data, len(data)*8),
@@ -274,7 +289,11 @@ func (msg *bitfieldMessage) BinaryDump(w io.Writer) error {
 	mw.Write(uint32(math.Ceil(float64(msg.blocks.Length())/8) + 1))
 	mw.Write(Bitfield)
 	mw.Write(msg.blocks.Bytes())
-	return mw.err
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
 }
 
 func (msg *bitfieldMessage) String() string {
@@ -293,7 +312,11 @@ func parseRequestMessage(r io.Reader) (msg *requestMessage, err error) {
 	mr.Read(&msg.pieceIndex)
 	mr.Read(&msg.blockOffset)
 	mr.Read(&msg.blockLength)
-	return msg, mr.err
+	if mr.err == nil {
+		return msg, nil
+	} else {
+		return nil, stackerr.Wrap(mr.err)
+	}
 }
 
 func (msg requestMessage) BinaryDump(w io.Writer) (err error) {
@@ -303,7 +326,11 @@ func (msg requestMessage) BinaryDump(w io.Writer) (err error) {
 	mw.Write(msg.pieceIndex)
 	mw.Write(msg.blockOffset)
 	mw.Write(msg.blockLength)
-	return mw.err
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
 }
 
 type pieceMessage struct {
@@ -314,14 +341,22 @@ type pieceMessage struct {
 
 func parsePieceMessage(r io.Reader) (msg *pieceMessage, err error) {
 	msg = new(pieceMessage)
+
 	mr := &monadReader{r: r}
 	mr.Read(&msg.pieceIndex)
 	mr.Read(&msg.blockOffset)
-	if err = mr.err; err != nil {
-		return
+
+	if mr.err != nil {
+		return nil, stackerr.Wrap(mr.err)
 	}
-	msg.data, err = ioutil.ReadAll(r)
-	return
+
+	if data, err := ioutil.ReadAll(r); err != nil {
+		return nil, stackerr.Wrap(err)
+	} else {
+		msg.data = data
+	}
+
+	return msg, nil
 }
 
 func (msg *pieceMessage) BinaryDump(w io.Writer) error {
@@ -332,7 +367,11 @@ func (msg *pieceMessage) BinaryDump(w io.Writer) error {
 	mw.Write(msg.pieceIndex)
 	mw.Write(msg.blockOffset)
 	mw.Write(msg.data)
-	return mw.err
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
 }
 
 type unknownMessage struct {

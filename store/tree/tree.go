@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/facebookgo/stackerr"
 	"github.com/torrance/libtorrent/metainfo"
 	"github.com/torrance/libtorrent/store"
 )
@@ -44,7 +45,7 @@ func NewTree(m *metainfo.Metainfo, config interface{}) (store.Store, error) {
 
 	for _, file := range m.Files {
 		if node, err := c.NodeFactory.Constructor(file.Path, file.Length, c.NodeFactory.Config); err != nil {
-			return nil, err
+			return nil, stackerr.Wrap(err)
 		} else {
 			t.nodes = append(t.nodes, node)
 		}
@@ -80,7 +81,7 @@ func (s *Tree) GetBlock(index int, offset int64, block []byte) (int, error) {
 			n += _n
 			seek = 0
 		} else if err != nil {
-			return n + _n, err
+			return n + _n, stackerr.Wrap(err)
 		}
 	}
 
@@ -114,7 +115,7 @@ func (s *Tree) SetBlock(index int, offset int64, block []byte) (int, error) {
 			n += _n
 			seek = 0
 		} else if err != nil {
-			return n + _n, err
+			return n + _n, stackerr.Wrap(err)
 		}
 	}
 

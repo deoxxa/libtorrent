@@ -1,74 +1,70 @@
 package libtorrent
 
 import (
-	"errors"
-	"fmt"
+	"github.com/facebookgo/stackerr"
 	"github.com/torrance/libtorrent/bitfield"
 )
 
 type swarmTally []int
 
-func (st swarmTally) AddBitfield(bitf *bitfield.Bitfield) (err error) {
+func (st swarmTally) AddBitfield(bitf *bitfield.Bitfield) error {
 	if len(st) != bitf.Length() {
-		err = errors.New(fmt.Sprintf("addBitfield: Supplied bitfield incorrect size, want %d, got %d", len(st), bitf.Length()))
-		return
+		return stackerr.Newf("addBitfield: Supplied bitfield incorrect size, want %d, got %d", len(st), bitf.Length())
 	}
 
 	for i := 0; i < len(st); i++ {
 		if st[i] == -1 {
-			// We have this piece.
 			continue
 		}
-		if bitf.Element(i) == 1 {
+
+		if bitf.Get(i) {
 			st[i]++
 		}
 	}
-	return
+
+	return nil
 }
 
-func (st swarmTally) AddIndex(i int) (err error) {
+func (st swarmTally) AddIndex(i int) error {
 	if i >= len(st) {
-		err = errors.New(fmt.Sprintf("addIndex: Supplied index too big, want <= %d, got %d", len(st), i))
-		return
+		return stackerr.Newf("addIndex: Supplied index too big, want <= %d, got %d", len(st), i)
 	}
 
 	if st[i] != -1 {
 		st[i]++
 	}
 
-	return
+	return nil
 }
 
-func (st swarmTally) RemoveBitfield(bitf *bitfield.Bitfield) (err error) {
+func (st swarmTally) RemoveBitfield(bitf *bitfield.Bitfield) error {
 	if len(st) != bitf.Length() {
-		err = errors.New(fmt.Sprintf("removeBitfield: Supplied bitfield incorrect size, want %d, got %d", len(st), bitf.Length()))
-		return
+		return stackerr.Newf("removeBitfield: Supplied bitfield incorrect size, want %d, got %d", len(st), bitf.Length())
 	}
 
 	for i := 0; i < len(st); i++ {
 		if st[i] <= 0 {
-			// We either have this piece, or something's gone wrong. Either way, leave as is.
 			continue
 		}
 
-		if bitf.Element(i) == 1 {
+		if bitf.Get(i) {
 			st[i]--
 		}
 	}
-	return
+
+	return nil
 }
 
-func (st swarmTally) RemoveIndex(i int) (err error) {
+func (st swarmTally) RemoveIndex(i int) error {
 	if i >= len(st) {
-		err = errors.New(fmt.Sprintf("removeIndex: Supplied index too big, want <= %d, got %d", len(st), i))
-		return
+		return stackerr.Newf("removeIndex: Supplied index too big, want <= %d, got %d", len(st), i)
 	}
 
 	if st[i] > 0 {
 		st[i]--
 	}
 
-	return
+	return nil
 }
 
 func (st swarmTally) Zero() {

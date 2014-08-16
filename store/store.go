@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha1"
 
+	"github.com/facebookgo/stackerr"
 	"github.com/torrance/libtorrent/bitfield"
 	"github.com/torrance/libtorrent/metainfo"
 )
@@ -27,12 +28,12 @@ type Store interface {
 func ValidateBlock(s Store, index int) (ok bool, err error) {
 	block := make([]byte, s.GetSize(index))
 	if _, err := s.GetBlock(index, 0, block); err != nil {
-		return false, err
+		return false, stackerr.Wrap(err)
 	}
 
 	hash, err := s.GetHash(index)
 	if err != nil {
-		return false, err
+		return false, stackerr.Wrap(err)
 	}
 
 	h := sha1.New()
@@ -46,7 +47,7 @@ func Validate(s Store) (*bitfield.Bitfield, error) {
 
 	for i := 0; i < s.Blocks(); i++ {
 		if ok, err := ValidateBlock(s, i); err != nil {
-			return nil, err
+			return nil, stackerr.Wrap(err)
 		} else if ok {
 			bv.Set(i, true)
 		}

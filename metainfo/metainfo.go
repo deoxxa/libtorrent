@@ -3,10 +3,10 @@ package metainfo
 import (
 	"bytes"
 	"crypto/sha1"
-	"errors"
 	"io"
 	"path/filepath"
 
+	"github.com/facebookgo/stackerr"
 	"github.com/zeebo/bencode"
 )
 
@@ -45,17 +45,17 @@ func ParseMetainfo(r io.Reader) (*Metainfo, error) {
 	// to obtain both the raw info data and its decoded form.
 	dec := bencode.NewDecoder(r)
 	if err := dec.Decode(&metaDecode); err != nil {
-		return nil, err
+		return nil, stackerr.Wrap(err)
 	}
 
 	dec = bencode.NewDecoder(bytes.NewReader(metaDecode.RawInfo))
 	if err := dec.Decode(&metaDecode.Info); err != nil {
-		return nil, err
+		return nil, stackerr.Wrap(err)
 	}
 
 	// Basic error checking
 	if len(metaDecode.Info.Pieces)%20 != 0 {
-		return nil, errors.New("Metainfo file malformed: Pieces length is not a multiple of 20.")
+		return nil, stackerr.New("Metainfo file malformed: Pieces length is not a multiple of 20.")
 	}
 	// TODO: Other error checking
 
