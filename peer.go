@@ -2,6 +2,7 @@ package libtorrent
 
 import (
 	"io"
+	"math"
 	"sync"
 	"time"
 
@@ -159,7 +160,19 @@ func (p *Peer) SetBitfield(blocks *bitfield.Bitfield) {
 
 func (p *Peer) HasPiece(index int) {
 	p.mutex.Lock()
+
+	if p.blocks == nil {
+		p.blocks = bitfield.NewBitfield(nil, index)
+	}
+
+	if p.blocks.Length() < index+1 {
+		d := make([]byte, int(math.Ceil(float64(index+1)/8)))
+		copy(d, p.blocks.Bytes())
+		p.blocks = bitfield.NewBitfield(d, index+1)
+	}
+
 	p.blocks.Set(index, true)
+
 	p.mutex.Unlock()
 }
 

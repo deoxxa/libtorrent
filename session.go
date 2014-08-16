@@ -318,6 +318,11 @@ func (s *Session) MaybeQueuePieceRequests(p *Peer) {
 	}
 
 	for i := 0; i < s.blocks.Length(); i++ {
+		// we don't have the full bitfield from this peer yet
+		if p.blocks.Length() <= i {
+			continue
+		}
+
 		if s.blocks.Get(i) || s.requesting.Get(i) || !p.blocks.Get(i) {
 			continue
 		}
