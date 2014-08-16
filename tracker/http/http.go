@@ -1,6 +1,8 @@
 package http
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -61,6 +63,7 @@ func (t *Transport) Announce(req *tracker.AnnounceRequest) (*tracker.AnnounceRes
 	q.Set("uploaded", fmt.Sprintf("%d", req.Uploaded))
 	q.Set("downloaded", fmt.Sprintf("%d", req.Downloaded))
 	q.Set("left", fmt.Sprintf("%d", req.Left))
+	q.Set("compact", "1")
 
 	u.RawQuery = q.Encode()
 
@@ -88,10 +91,21 @@ func (t *Transport) Announce(req *tracker.AnnounceRequest) (*tracker.AnnounceRes
 			return nil, stackerr.New("invalid compact peer data")
 		}
 
+		buf := bytes.NewBuffer([]byte(rp))
+
 		for i := 0; i < len(rp)/6; i++ {
+			var a, b, c, d byte
+			var port uint16
+
+			binary.Read(buf, binary.BigEndian, &a)
+			binary.Read(buf, binary.BigEndian, &b)
+			binary.Read(buf, binary.BigEndian, &c)
+			binary.Read(buf, binary.BigEndian, &d)
+			binary.Read(buf, binary.BigEndian, &port)
+
 			ares.Peers = append(ares.Peers, &libtorrent.PeerAddress{
-				Host: fmt.Sprintf("%d.%d.%d.%d", rp[i*6+0], rp[i*6+1], rp[i*6+2], rp[i*6+3]),
-				Port: uint16(rp[i*6+4]*255) + uint16(rp[i*6+5]),
+				Host: fmt.Sprintf("%d.%d.%d.%d", a, b, c, d),
+				Port: port,
 			})
 		}
 	default:
