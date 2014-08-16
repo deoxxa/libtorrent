@@ -86,7 +86,7 @@ func NewPeer(addr string, hs *handshake, conn io.ReadWriter) (p *Peer) {
 	go func() {
 		for {
 			if msg, err := parsePeerMessage(conn); err != nil {
-				p.Errors <- err
+				p.Errors <- stackerr.Wrap(err)
 			} else {
 				p.Incoming <- msg
 			}
