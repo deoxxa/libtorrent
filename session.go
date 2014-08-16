@@ -457,6 +457,12 @@ func (s *Session) ReadFromPeer(peer *Peer) {
 
 				peer.requestingBlock = -1
 
+				if s.blocks.SumTrue() == s.blocks.Length() {
+					s.stateLock.Lock()
+					s.state = STATE_SEEDING
+					s.stateLock.Unlock()
+				}
+
 				s.MaybeQueuePieceRequests(peer)
 			} else {
 				peer.MaybeSendPieceRequests()
