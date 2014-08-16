@@ -129,7 +129,7 @@ func (t *Tracker) Start() {
 				continue
 			}
 
-			t.next = time.Second * ares.SuggestedInterval
+			t.next = ares.SuggestedInterval
 
 			event = EVENT_NONE
 
