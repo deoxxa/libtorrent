@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/funkygao/golib/profile"
 	"github.com/torrance/libtorrent"
 	"github.com/torrance/libtorrent/metainfo"
 	"github.com/torrance/libtorrent/peersource/nullsource"
@@ -20,6 +21,8 @@ import (
 )
 
 func main() {
+	defer profile.Start(profile.CPUProfile).Stop()
+
 	log.SetFlags(log.Lshortfile)
 
 	rand.Seed(time.Now().UnixNano())
