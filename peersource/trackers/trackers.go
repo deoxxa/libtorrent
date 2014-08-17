@@ -5,11 +5,10 @@ import (
 
 	"github.com/facebookgo/stackerr"
 	"github.com/torrance/libtorrent"
-	"github.com/torrance/libtorrent/tracker"
 )
 
 type Config struct {
-	Transports map[string]tracker.TransportFactory
+	Transports map[string]libtorrent.TrackerTransportFactory
 }
 
 type Trackers struct {
@@ -17,7 +16,7 @@ type Trackers struct {
 	config   Config
 	errors   chan error
 	peers    chan *libtorrent.PeerAddress
-	trackers []*tracker.Tracker
+	trackers []*libtorrent.Tracker
 	started  bool
 }
 
@@ -58,7 +57,7 @@ func (s *Trackers) Metainfo(m *libtorrent.Metainfo) error {
 			continue
 		}
 
-		t, err := tracker.NewTracker(transport, s.session)
+		t, err := libtorrent.NewTracker(transport, s.session)
 		if err != nil {
 			s.errors <- stackerr.Wrap(err)
 			continue

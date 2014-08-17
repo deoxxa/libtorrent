@@ -36,7 +36,7 @@ func (bf *Bitfield) Get(i int) bool {
 	return bf.BitVector.Element(i) == 1
 }
 
-func (bf *Bitfield) SumTrue() int {
+func (bf *Bitfield) Sum() int {
 	sum := 0
 
 	for i := 0; i < bf.Length(); i++ {

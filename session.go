@@ -10,6 +10,20 @@ import (
 	"github.com/facebookgo/stackerr"
 )
 
+type SessionState byte
+
+const (
+	STATE_STOPPED = SessionState(iota)
+	STATE_LEARNING
+	STATE_LEECHING
+	STATE_SEEDING
+)
+
+var ZERO_HASH = [20]byte{
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+}
+
 type Session struct {
 	errors chan error
 
@@ -19,7 +33,7 @@ type Session struct {
 	peerId   [20]byte
 	name     string
 
-	state     int
+	state     SessionState
 	stateLock sync.Mutex
 
 	peerSources []PeerSource
@@ -159,7 +173,7 @@ func (s *Session) SetMetainfo(m *Metainfo) error {
 		s.store = store
 	}
 
-	if blocks, err := Validate(s.store); err != nil {
+	if blocks, err := validate(s.store); err != nil {
 		return stackerr.Wrap(err)
 	} else {
 		s.blocks = blocks
@@ -197,7 +211,7 @@ func (s *Session) AddPeerSource(peerSource PeerSource) error {
 
 	go func() {
 		for addr := range peerSource.Peers() {
-			s.ConnectToPeer(addr)
+			s.connectToPeer(addr)
 		}
 	}()
 
@@ -215,7 +229,7 @@ func (s *Session) Start() error {
 
 	if s.metainfo == nil {
 		s.state = STATE_LEARNING
-	} else if s.blocks.SumTrue() < s.blocks.Length() {
+	} else if s.blocks.Sum() < s.blocks.Length() {
 		s.state = STATE_LEECHING
 	} else {
 		s.state = STATE_SEEDING
@@ -234,15 +248,13 @@ func (s *Session) Start() error {
 
 func (s *Session) Stop() error {
 	s.stateLock.Lock()
-
 	s.state = STATE_STOPPED
-
 	s.stateLock.Unlock()
 
 	return nil
 }
 
-func (s *Session) State() int {
+func (s *Session) State() SessionState {
 	s.stateLock.Lock()
 	state := s.state
 	s.stateLock.Unlock()
@@ -282,7 +294,7 @@ func (s *Session) AddPeer(conn net.Conn, hs *handshake) error {
 
 	s.swarm[peer.addr] = peer
 
-	go s.ReadFromPeer(peer)
+	go s.readFromPeer(peer)
 
 	return nil
 }
@@ -297,7 +309,133 @@ func (s *Session) RemovePeer(peer *Peer) error {
 	return nil
 }
 
-func (s *Session) MaybeQueuePieceRequests(p *Peer) {
+func (s *Session) connectToPeer(peerAddress *PeerAddress) {
+	if s.state == STATE_STOPPED || s.state == STATE_SEEDING {
+		return
+	}
+
+	p := fmt.Sprintf("%s:%d", peerAddress.Host, peerAddress.Port)
+
+	if _, ok := s.swarm[p]; ok {
+		return
+	}
+
+	if _, ok := s.connecting[p]; ok {
+		return
+	}
+
+	s.connecting[p] = true
+
+	go func() {
+		defer func() {
+			delete(s.connecting, p)
+		}()
+
+		if conn, err := net.Dial("tcp", p); err != nil {
+			s.errors <- stackerr.Wrap(err)
+		} else if err := s.AddPeer(conn, nil); err != nil {
+			s.errors <- stackerr.Wrap(err)
+		}
+	}()
+}
+
+func (s *Session) readFromPeer(peer *Peer) {
+	for msg := range peer.Incoming {
+		switch msg := msg.(type) {
+		case *keepaliveMessage:
+		case *chokeMessage:
+			peer.SetPeerChoking(true)
+		case *unchokeMessage:
+			peer.SetPeerChoking(false)
+			s.maybeQueuePieceRequests(peer)
+		case *interestedMessage:
+			peer.SetPeerInterested(true)
+			if peer.SetAmChoking(false) {
+				peer.Outgoing <- &unchokeMessage{}
+			}
+		case *uninterestedMessage:
+			peer.SetPeerInterested(false)
+		case *haveMessage:
+			pieceIndex := int(msg.pieceIndex)
+			if pieceIndex >= s.metainfo.PieceCount {
+				break
+			}
+			peer.HasPiece(pieceIndex)
+			s.swarmTally.AddIndex(pieceIndex)
+			s.maybeQueuePieceRequests(peer)
+		case *bitfieldMessage:
+			peer.SetBitfield(msg.blocks)
+			s.swarmTally.AddBitfield(msg.blocks)
+			s.maybeQueuePieceRequests(peer)
+		case *requestMessage:
+			if peer.GetAmChoking() || !s.blocks.Get(int(msg.pieceIndex)) || msg.blockLength > 32768 {
+				break
+			}
+
+			block := make([]byte, msg.blockLength)
+			if _, err := s.store.GetBlock(int(msg.pieceIndex), int64(msg.blockOffset), block); err != nil {
+				s.errors <- stackerr.Wrap(err)
+				break
+			}
+
+			peer.Outgoing <- &pieceMessage{
+				pieceIndex:  msg.pieceIndex,
+				blockOffset: msg.blockOffset,
+				data:        block,
+			}
+		case *pieceMessage:
+			rm := requestMessage{
+				pieceIndex:  msg.pieceIndex,
+				blockOffset: msg.blockOffset,
+				blockLength: uint32(len(msg.data)),
+			}
+
+			if peer.requestsRunning.Delete(rm) {
+				if _, err := s.store.SetBlock(int(msg.pieceIndex), int64(msg.blockOffset), msg.data); err != nil {
+					s.errors <- stackerr.Wrap(err)
+				}
+			}
+
+			if peer.requestQueue.Len()+peer.requestsRunning.Len() == 0 {
+				if ok, err := validateBlock(s.store, peer.requestingBlock); err != nil {
+					s.errors <- stackerr.Wrap(err)
+				} else {
+					if ok {
+						s.blocks.Set(peer.requestingBlock, true)
+						s.requesting.Set(peer.requestingBlock, false)
+
+						hm := &haveMessage{pieceIndex: uint32(peer.requestingBlock)}
+						for _, peer := range s.swarm {
+							peer.Outgoing <- hm
+						}
+					} else {
+						s.requesting.Set(peer.requestingBlock, false)
+					}
+				}
+
+				peer.requestingBlock = -1
+
+				if s.blocks.Sum() == s.blocks.Length() {
+					s.stateLock.Lock()
+					s.state = STATE_SEEDING
+					s.stateLock.Unlock()
+				}
+
+				s.maybeQueuePieceRequests(peer)
+			} else {
+				peer.maybeSendPieceRequests()
+			}
+		// case *cancelMessage:
+		default:
+		}
+	}
+
+	if err := s.RemovePeer(peer); err != nil {
+		s.errors <- stackerr.Wrap(err)
+	}
+}
+
+func (s *Session) maybeQueuePieceRequests(p *Peer) {
 	if p.blocks == nil {
 		return
 	}
@@ -337,132 +475,6 @@ func (s *Session) MaybeQueuePieceRequests(p *Peer) {
 			})
 		}
 
-		p.MaybeSendPieceRequests()
-	}
-}
-
-func (s *Session) ConnectToPeer(peerAddress *PeerAddress) {
-	if s.state == STATE_STOPPED || s.state == STATE_SEEDING {
-		return
-	}
-
-	p := fmt.Sprintf("%s:%d", peerAddress.Host, peerAddress.Port)
-
-	if _, ok := s.swarm[p]; ok {
-		return
-	}
-
-	if _, ok := s.connecting[p]; ok {
-		return
-	}
-
-	s.connecting[p] = true
-
-	go func() {
-		defer func() {
-			delete(s.connecting, p)
-		}()
-
-		if conn, err := net.Dial("tcp", p); err != nil {
-			s.errors <- stackerr.Wrap(err)
-		} else if err := s.AddPeer(conn, nil); err != nil {
-			s.errors <- stackerr.Wrap(err)
-		}
-	}()
-}
-
-func (s *Session) ReadFromPeer(peer *Peer) {
-	for msg := range peer.Incoming {
-		switch msg := msg.(type) {
-		case *keepaliveMessage:
-		case *chokeMessage:
-			peer.SetPeerChoking(true)
-		case *unchokeMessage:
-			peer.SetPeerChoking(false)
-			s.MaybeQueuePieceRequests(peer)
-		case *interestedMessage:
-			peer.SetPeerInterested(true)
-			if peer.SetAmChoking(false) {
-				peer.Outgoing <- &unchokeMessage{}
-			}
-		case *uninterestedMessage:
-			peer.SetPeerInterested(false)
-		case *haveMessage:
-			pieceIndex := int(msg.pieceIndex)
-			if pieceIndex >= s.metainfo.PieceCount {
-				break
-			}
-			peer.HasPiece(pieceIndex)
-			s.swarmTally.AddIndex(pieceIndex)
-			s.MaybeQueuePieceRequests(peer)
-		case *bitfieldMessage:
-			peer.SetBitfield(msg.blocks)
-			s.swarmTally.AddBitfield(msg.blocks)
-			s.MaybeQueuePieceRequests(peer)
-		case *requestMessage:
-			if peer.GetAmChoking() || !s.blocks.Get(int(msg.pieceIndex)) || msg.blockLength > 32768 {
-				break
-			}
-
-			block := make([]byte, msg.blockLength)
-			if _, err := s.store.GetBlock(int(msg.pieceIndex), int64(msg.blockOffset), block); err != nil {
-				s.errors <- stackerr.Wrap(err)
-				break
-			}
-
-			peer.Outgoing <- &pieceMessage{
-				pieceIndex:  msg.pieceIndex,
-				blockOffset: msg.blockOffset,
-				data:        block,
-			}
-		case *pieceMessage:
-			rm := requestMessage{
-				pieceIndex:  msg.pieceIndex,
-				blockOffset: msg.blockOffset,
-				blockLength: uint32(len(msg.data)),
-			}
-
-			if peer.requestsRunning.Delete(rm) {
-				if _, err := s.store.SetBlock(int(msg.pieceIndex), int64(msg.blockOffset), msg.data); err != nil {
-					s.errors <- stackerr.Wrap(err)
-				}
-			}
-
-			if peer.requestQueue.Len()+peer.requestsRunning.Len() == 0 {
-				if ok, err := ValidateBlock(s.store, peer.requestingBlock); err != nil {
-					s.errors <- stackerr.Wrap(err)
-				} else {
-					if ok {
-						s.blocks.Set(peer.requestingBlock, true)
-						s.requesting.Set(peer.requestingBlock, false)
-
-						hm := &haveMessage{pieceIndex: uint32(peer.requestingBlock)}
-						for _, peer := range s.swarm {
-							peer.Outgoing <- hm
-						}
-					} else {
-						s.requesting.Set(peer.requestingBlock, false)
-					}
-				}
-
-				peer.requestingBlock = -1
-
-				if s.blocks.SumTrue() == s.blocks.Length() {
-					s.stateLock.Lock()
-					s.state = STATE_SEEDING
-					s.stateLock.Unlock()
-				}
-
-				s.MaybeQueuePieceRequests(peer)
-			} else {
-				peer.MaybeSendPieceRequests()
-			}
-		// case *cancelMessage:
-		default:
-		}
-	}
-
-	if err := s.RemovePeer(peer); err != nil {
-		s.errors <- stackerr.Wrap(err)
+		p.maybeSendPieceRequests()
 	}
 }

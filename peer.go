@@ -175,7 +175,7 @@ func (p *Peer) HasPiece(index int) {
 	p.mutex.Unlock()
 }
 
-func (p *Peer) MaybeSendPieceRequests() {
+func (p *Peer) maybeSendPieceRequests() {
 	p.mutex.Lock()
 
 	for {

@@ -13,8 +13,8 @@ func TestBitfieldSetTrue(t *testing.T) {
 	if !bytes.Equal(bf.field, []byte{0x81, 0x40}) {
 		t.Errorf("Bitfield SetTrue failed, got: %x", bf.field)
 	}
-	if bf.SumTrue() != 3 {
-		t.Errorf("Bitfield SumTrue incorrect, got: %d", bf.SumTrue())
+	if bf.Sum() != 3 {
+		t.Errorf("Bitfield Sum incorrect, got: %d", bf.Sum())
 	}
 }
 

@@ -12,7 +12,6 @@ import (
 
 	"github.com/facebookgo/stackerr"
 	"github.com/torrance/libtorrent"
-	"github.com/torrance/libtorrent/tracker"
 )
 
 type Transport struct {
@@ -21,7 +20,7 @@ type Transport struct {
 	cid  uint64
 }
 
-func NewTransport(u *url.URL, config interface{}) (tracker.Transport, error) {
+func NewTransport(u *url.URL, config interface{}) (libtorrent.TrackerTransport, error) {
 	conn, err := net.Dial("udp", u.Host)
 	if err != nil {
 		return nil, stackerr.Wrap(err)
@@ -50,7 +49,7 @@ func NewTransport(u *url.URL, config interface{}) (tracker.Transport, error) {
 	return t, nil
 }
 
-func (u *Transport) Announce(req *tracker.AnnounceRequest) (*tracker.AnnounceResponse, error) {
+func (u *Transport) Announce(req *libtorrent.TrackerAnnounceRequest) (*libtorrent.TrackerAnnounceResponse, error) {
 	areq := announceRequest{
 		connectionId:  u.cid,
 		transactionId: uint32(rand.Int31()),
@@ -80,7 +79,7 @@ func (u *Transport) Announce(req *tracker.AnnounceRequest) (*tracker.AnnounceRes
 		return nil, stackerr.Newf("action is not set to announce (1), instead got %d", ares.action)
 	}
 
-	r := &tracker.AnnounceResponse{
+	r := &libtorrent.TrackerAnnounceResponse{
 		Leechers:          uint32(ares.leechers),
 		Seeders:           uint32(ares.seeders),
 		Peers:             ares.peers,

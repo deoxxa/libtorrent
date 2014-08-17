@@ -1,15 +1,14 @@
-package tracker
+package libtorrent
 
 import (
 	"net/url"
 	"time"
 
 	"github.com/facebookgo/stackerr"
-	"github.com/torrance/libtorrent"
 )
 
-type TransportFactory struct {
-	Constructor func(u *url.URL, config interface{}) (Transport, error)
+type TrackerTransportFactory struct {
+	Constructor func(u *url.URL, config interface{}) (TrackerTransport, error)
 	Config      interface{}
 }
 
@@ -32,7 +31,7 @@ const (
 	EVENT_STOPPED
 )
 
-type AnnounceRequest struct {
+type TrackerAnnounceRequest struct {
 	Event      Event
 	InfoHash   [20]byte
 	PeerId     [20]byte
@@ -43,23 +42,23 @@ type AnnounceRequest struct {
 	Left       int64
 }
 
-type AnnounceResponse struct {
+type TrackerAnnounceResponse struct {
 	Leechers          uint32
 	Seeders           uint32
-	Peers             []*libtorrent.PeerAddress
+	Peers             []*PeerAddress
 	SuggestedInterval time.Duration
 	RequiredInterval  time.Duration
 }
 
-type Transport interface {
-	Announce(req *AnnounceRequest) (*AnnounceResponse, error)
+type TrackerTransport interface {
+	Announce(req *TrackerAnnounceRequest) (*TrackerAnnounceResponse, error)
 }
 
 type Tracker struct {
 	errors chan error
-	peers  chan *libtorrent.PeerAddress
+	peers  chan *PeerAddress
 
-	transport Transport
+	transport TrackerTransport
 	subject   Trackable
 
 	force chan bool
@@ -72,7 +71,7 @@ func (t *Tracker) Errors() chan error {
 	return t.errors
 }
 
-func (t *Tracker) Peers() chan *libtorrent.PeerAddress {
+func (t *Tracker) Peers() chan *PeerAddress {
 	return t.peers
 }
 
@@ -80,10 +79,10 @@ func (t *Tracker) Update() {
 	t.force <- true
 }
 
-func NewTracker(transport Transport, subject Trackable) (*Tracker, error) {
+func NewTracker(transport TrackerTransport, subject Trackable) (*Tracker, error) {
 	t := &Tracker{
 		errors:    make(chan error, 50),
-		peers:     make(chan *libtorrent.PeerAddress, 50),
+		peers:     make(chan *PeerAddress, 50),
 		transport: transport,
 		subject:   subject,
 		force:     make(chan bool, 50),
@@ -108,7 +107,7 @@ func (t *Tracker) Start() {
 				break L
 			}
 
-			areq := &AnnounceRequest{
+			areq := &TrackerAnnounceRequest{
 				Event:      event,
 				InfoHash:   t.subject.InfoHash(),
 				PeerId:     t.subject.PeerId(),
@@ -138,7 +137,7 @@ func (t *Tracker) Start() {
 			}
 		}
 
-		sreq := &AnnounceRequest{
+		sreq := &TrackerAnnounceRequest{
 			Event:      EVENT_STOPPED,
 			InfoHash:   t.subject.InfoHash(),
 			PeerId:     t.subject.PeerId(),

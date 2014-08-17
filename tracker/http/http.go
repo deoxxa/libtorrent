@@ -10,7 +10,6 @@ import (
 
 	"github.com/facebookgo/stackerr"
 	"github.com/torrance/libtorrent"
-	"github.com/torrance/libtorrent/tracker"
 	"github.com/zeebo/bencode"
 )
 
@@ -20,7 +19,7 @@ type Transport struct {
 
 var EventNames = []string{"empty", "started", "completed", "stopped"}
 
-func NewTransport(u *url.URL, config interface{}) (tracker.Transport, error) {
+func NewTransport(u *url.URL, config interface{}) (libtorrent.TrackerTransport, error) {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, stackerr.New("scheme is unrecognised")
 	}
@@ -43,7 +42,7 @@ type AnnounceResponse struct {
 	Peers           []*libtorrent.PeerAddress `bencode:"-"`
 }
 
-func (t *Transport) Announce(req *tracker.AnnounceRequest) (*tracker.AnnounceResponse, error) {
+func (t *Transport) Announce(req *libtorrent.TrackerAnnounceRequest) (*libtorrent.TrackerAnnounceResponse, error) {
 	u, err := url.Parse(t.u.String())
 	if err != nil {
 		return nil, stackerr.Wrap(err)
@@ -112,7 +111,7 @@ func (t *Transport) Announce(req *tracker.AnnounceRequest) (*tracker.AnnounceRes
 		return nil, stackerr.New("invalid peer key type")
 	}
 
-	r := tracker.AnnounceResponse{
+	r := libtorrent.TrackerAnnounceResponse{
 		Leechers:          ares.Incomplete,
 		Seeders:           ares.Complete,
 		Peers:             ares.Peers,

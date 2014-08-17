@@ -7,10 +7,8 @@ import (
 	"github.com/facebookgo/stackerr"
 )
 
-type StoreConstructor func(m *Metainfo, config interface{}) (store Store, err error)
-
 type StoreFactory struct {
-	Constructor StoreConstructor
+	Constructor func(m *Metainfo, config interface{}) (store Store, err error)
 	Config      interface{}
 }
 
@@ -23,7 +21,7 @@ type Store interface {
 	SetBlock(index int, offset int64, block []byte) (n int, err error)
 }
 
-func ValidateBlock(s Store, index int) (ok bool, err error) {
+func validateBlock(s Store, index int) (ok bool, err error) {
 	block := make([]byte, s.GetSize(index))
 	if _, err := s.GetBlock(index, 0, block); err != nil {
 		return false, stackerr.Wrap(err)
@@ -40,11 +38,11 @@ func ValidateBlock(s Store, index int) (ok bool, err error) {
 	return bytes.Equal(h.Sum(nil), hash[:]), nil
 }
 
-func Validate(s Store) (*Bitfield, error) {
+func validate(s Store) (*Bitfield, error) {
 	bv := NewBitfield(nil, s.Blocks())
 
 	for i := 0; i < s.Blocks(); i++ {
-		if ok, err := ValidateBlock(s, i); err != nil {
+		if ok, err := validateBlock(s, i); err != nil {
 			return nil, stackerr.Wrap(err)
 		} else if ok {
 			bv.Set(i, true)

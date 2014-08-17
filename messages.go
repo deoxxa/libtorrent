@@ -11,8 +11,10 @@ import (
 	"github.com/facebookgo/stackerr"
 )
 
+type MessageType byte
+
 const (
-	MESSAGE_CHOKE = uint8(iota)
+	MESSAGE_CHOKE = MessageType(iota)
 	MESSAGE_UNCHOKE
 	MESSAGE_INTERESTED
 	MESSAGE_UNINTERESTED
@@ -129,7 +131,7 @@ func parsePeerMessage(r io.Reader) (interface{}, error) {
 	}
 	payloadReader := bytes.NewReader(payload)
 
-	switch id {
+	switch MessageType(id) {
 	case MESSAGE_CHOKE:
 		return parseChokeMessage(payloadReader)
 	case MESSAGE_UNCHOKE:

@@ -9,10 +9,9 @@ import (
 
 	"github.com/funkygao/golib/profile"
 	"github.com/torrance/libtorrent"
-	"github.com/torrance/libtorrent/peersource/nullsource"
+	// "github.com/torrance/libtorrent/peersource/nullsource"
 	"github.com/torrance/libtorrent/peersource/trackers"
 	"github.com/torrance/libtorrent/store/tree"
-	"github.com/torrance/libtorrent/tracker"
 	"github.com/torrance/libtorrent/tracker/http"
 	"github.com/torrance/libtorrent/tracker/udp"
 	"github.com/wsxiaoys/terminal/color"
@@ -58,23 +57,23 @@ func main() {
 			},
 		},
 		PeerSourceFactories: []libtorrent.PeerSourceFactory{
-			libtorrent.PeerSourceFactory{
-				Constructor: nullsource.NewNullSource,
-				Config:      nil,
-			},
+			// libtorrent.PeerSourceFactory{
+			// 	Constructor: nullsource.NewNullSource,
+			// 	Config:      nil,
+			// },
 			libtorrent.PeerSourceFactory{
 				Constructor: trackers.NewTrackers,
 				Config: trackers.Config{
-					Transports: map[string]tracker.TransportFactory{
-						"http": tracker.TransportFactory{
+					Transports: map[string]libtorrent.TrackerTransportFactory{
+						"http": libtorrent.TrackerTransportFactory{
 							Constructor: http.NewTransport,
 							Config:      nil,
 						},
-						"https": tracker.TransportFactory{
+						"https": libtorrent.TrackerTransportFactory{
 							Constructor: http.NewTransport,
 							Config:      nil,
 						},
-						"udp": tracker.TransportFactory{
+						"udp": libtorrent.TrackerTransportFactory{
 							Constructor: udp.NewTransport,
 							Config:      nil,
 						},
