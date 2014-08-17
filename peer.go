@@ -15,6 +15,8 @@ type Peer struct {
 	Incoming chan interface{}
 	Outgoing chan binaryDumper
 
+	kill chan bool
+
 	addr string
 	conn io.ReadWriter
 
@@ -53,6 +55,8 @@ func NewPeer(addr string, hs *handshake, conn io.ReadWriter) (p *Peer) {
 		Incoming: make(chan interface{}, 10),
 		Outgoing: make(chan binaryDumper, 10),
 
+		kill: make(chan bool, 1),
+
 		addr: addr,
 		conn: conn,
 
@@ -83,13 +87,24 @@ func (p *Peer) readMessages() {
 	for {
 		if msg, err := parsePeerMessage(p, p.conn); err != nil {
 			p.Errors <- stackerr.Wrap(err)
+
+			e := stackerr.Underlying(err)
+			if e != nil && e[len(e)-1] == io.EOF {
+				break
+			}
 		} else {
 			p.Incoming <- msg
 		}
 	}
+
+	p.kill <- true
+
+	close(p.Errors)
+	close(p.Incoming)
 }
 
 func (p *Peer) writeMessages() {
+LOOP:
 	for {
 		var msg binaryDumper
 
@@ -98,12 +113,16 @@ func (p *Peer) writeMessages() {
 			msg = _msg
 		case <-time.After(time.Second * 30):
 			msg = new(keepaliveMessage)
+		case <-p.kill:
+			break LOOP
 		}
 
 		if err := msg.BinaryDump(p, p.conn); err != nil {
 			p.Errors <- stackerr.Wrap(err)
 		}
 	}
+
+	close(p.Outgoing)
 }
 
 func (p *Peer) GetAmChoking() (b bool) {
