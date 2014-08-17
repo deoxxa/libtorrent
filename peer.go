@@ -157,7 +157,7 @@ func (p *Peer) SetBitfield(blocks *Bitfield) {
 	p.mutex.Unlock()
 }
 
-func (p *Peer) HasPiece(index int) {
+func (p *Peer) MarkPieceComplete(index int) {
 	p.mutex.Lock()
 
 	if p.blocks == nil {

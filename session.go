@@ -360,7 +360,7 @@ func (s *Session) readFromPeer(peer *Peer) {
 			if pieceIndex >= s.metainfo.PieceCount {
 				break
 			}
-			peer.HasPiece(pieceIndex)
+			peer.MarkPieceComplete(pieceIndex)
 			s.swarmTally.AddIndex(pieceIndex)
 			s.maybeQueuePieceRequests(peer)
 		case *bitfieldMessage:
