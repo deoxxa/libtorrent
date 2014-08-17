@@ -113,8 +113,8 @@ func (s *Trackers) Stop() error {
 	return nil
 }
 
-func (s *Trackers) Update() {
+func (s *Trackers) ForceUpdate() {
 	for _, tracker := range s.trackers {
-		tracker.Update()
+		tracker.ForceUpdate()
 	}
 }

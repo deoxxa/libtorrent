@@ -75,7 +75,7 @@ func (t *Tracker) Peers() chan *PeerAddress {
 	return t.peers
 }
 
-func (t *Tracker) Update() {
+func (t *Tracker) ForceUpdate() {
 	t.force <- true
 }
 

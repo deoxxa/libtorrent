@@ -52,6 +52,6 @@ func (s *NullSource) Stop() error {
 	return nil
 }
 
-func (s *NullSource) Update() {
+func (s *NullSource) ForceUpdate() {
 	log.Printf("update")
 }

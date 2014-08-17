@@ -16,5 +16,5 @@ type PeerSource interface {
 	Peers() chan *PeerAddress
 	Start() error
 	Stop() error
-	Update()
+	ForceUpdate()
 }
