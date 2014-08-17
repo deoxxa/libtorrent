@@ -194,6 +194,14 @@ func (s *Session) SetMetainfo(m *Metainfo) error {
 		}
 	}
 
+	for i := 0; i < s.blocks.Length(); i++ {
+		if s.blocks.Get(i) {
+			for _, peer := range s.swarm {
+				peer.Outgoing <- &haveMessage{pieceIndex: uint32(i)}
+			}
+		}
+	}
+
 	for _, peer := range s.swarm {
 		s.maybeQueuePieceRequests(peer)
 	}
@@ -279,8 +287,6 @@ func (s *Session) AddPeer(conn net.Conn, hs *handshake) error {
 
 	outgoingHandshake := newHandshake(s.InfoHash(), s.PeerId())
 	outgoingHandshake.flags.Set(43, true)
-
-	log.Printf("%#v", outgoingHandshake.flags)
 
 	if err := outgoingHandshake.BinaryDump(conn); err != nil {
 		return stackerr.Wrap(err)
@@ -494,8 +500,8 @@ func (s *Session) readMessagesFromPeer(peer *Peer) {
 				Messages: msg.Messages,
 			}
 
-			if id, ok := peer.extensionIds["ut_metadata"]; ok && msg.MetadataSize != 0 {
-				log.Printf("we can fetch metadata from this peer via message %d", id)
+			if id, ok := peer.extensionIds["ut_metadata"]; ok && msg.MetadataSize != 0 && s.metainfo == nil {
+				log.Printf("trying to fetch metadata from peer via message %d", id)
 
 				t := int(math.Ceil(float64(msg.MetadataSize) / 16384))
 
