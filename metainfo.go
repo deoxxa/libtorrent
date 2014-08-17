@@ -78,7 +78,7 @@ func ParseMetainfo(r io.Reader) (*Metainfo, error) {
 	}
 	// Now unravel map into list
 	m.AnnounceList = make([]string, 0, len(lists))
-	for list, _ := range lists {
+	for list := range lists {
 		m.AnnounceList = append(m.AnnounceList, list)
 	}
 

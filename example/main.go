@@ -61,19 +61,19 @@ func main() {
 			// 	Constructor: nullsource.NewNullSource,
 			// 	Config:      nil,
 			// },
-			libtorrent.PeerSourceFactory{
+			{
 				Constructor: trackers.NewTrackers,
 				Config: trackers.Config{
 					Transports: map[string]libtorrent.TrackerTransportFactory{
-						"http": libtorrent.TrackerTransportFactory{
+						"http": {
 							Constructor: http.NewTransport,
 							Config:      nil,
 						},
-						"https": libtorrent.TrackerTransportFactory{
+						"https": {
 							Constructor: http.NewTransport,
 							Config:      nil,
 						},
-						"udp": libtorrent.TrackerTransportFactory{
+						"udp": {
 							Constructor: udp.NewTransport,
 							Config:      nil,
 						},
