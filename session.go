@@ -270,7 +270,7 @@ func (s *Session) AddPeer(conn net.Conn, hs *handshake) error {
 	conn.SetDeadline(time.Now().Add(time.Minute))
 
 	outgoingHandshake := newHandshake(s.InfoHash(), s.PeerId())
-	outgoingHandshake.flags.Set(20, true)
+	outgoingHandshake.flags.Set(44, true)
 
 	if err := outgoingHandshake.BinaryDump(conn); err != nil {
 		return stackerr.Wrap(err)
