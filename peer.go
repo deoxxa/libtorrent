@@ -58,7 +58,7 @@ func NewPeer(addr string, hs *handshake, conn io.ReadWriter) (p *Peer) {
 
 		peerId: hs.peerId,
 
-		hasExtensions:  hs.flags.Get(44),
+		hasExtensions:  hs.flags.Get(43),
 		extensionIds:   map[string]int{},
 		extensionNames: map[int]string{},
 

@@ -2,12 +2,11 @@ package libtorrent
 
 import (
 	"math"
-
-	"github.com/dropbox/godropbox/container/bitvector"
 )
 
 type Bitfield struct {
-	bitvector.BitVector
+	data   []byte
+	length int
 }
 
 func NewBitfield(data []byte, length int) *Bitfield {
@@ -16,31 +15,44 @@ func NewBitfield(data []byte, length int) *Bitfield {
 	}
 
 	return &Bitfield{
-		BitVector: *bitvector.NewBitVector(data, length),
+		data:   data,
+		length: length,
 	}
+}
+
+func (bf *Bitfield) Bytes() []byte {
+	return bf.data
+}
+
+func (bf *Bitfield) Length() int {
+	return bf.length
 }
 
 func (bf *Bitfield) Set(i int, v bool) {
-	var n byte
+	b := uint(i-(i%8)) / 8
+	c := uint(7 - (i % 8))
 
 	if v {
-		n = 1
+		bf.data[b] = bf.data[b] | (1 << c)
 	} else {
-		n = 0
+		bf.data[b] = bf.data[b] & (0xff - (1 << c))
 	}
-
-	bf.BitVector.Set(n, i)
 }
 
 func (bf *Bitfield) Get(i int) bool {
-	return bf.BitVector.Element(i) == 1
+	b := uint(i-(i%8)) / 8
+	c := uint(7 - (i % 8))
+
+	return (bf.data[b] & (1 << c)) != 0
 }
 
 func (bf *Bitfield) Sum() int {
 	sum := 0
 
 	for i := 0; i < bf.Length(); i++ {
-		sum += int(bf.Element(i))
+		if bf.Get(i) {
+			sum++
+		}
 	}
 
 	return sum
