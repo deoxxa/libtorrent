@@ -3,6 +3,7 @@ package libtorrent
 import (
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"sync"
 	"time"
@@ -54,7 +55,7 @@ type peerDouble struct {
 	msg  interface{}
 }
 
-func NewSession(m *Metainfo, config *Config) (*Session, error) {
+func NewSession(config *Config, m *Metainfo) (*Session, error) {
 	s := &Session{
 		errors: make(chan error, 100),
 
@@ -182,13 +183,19 @@ func (s *Session) SetMetainfo(m *Metainfo) error {
 	s.requesting = NewBitfield(nil, s.blocks.Length())
 
 	if s.state == STATE_LEARNING {
+		s.stateLock.Lock()
 		s.state = STATE_LEECHING
+		s.stateLock.Unlock()
 	}
 
 	for _, peerSource := range s.peerSources {
 		if err := peerSource.Metainfo(m); err != nil {
 			return stackerr.Wrap(err)
 		}
+	}
+
+	for _, peer := range s.swarm {
+		s.maybeQueuePieceRequests(peer)
 	}
 
 	return nil
@@ -262,6 +269,10 @@ func (s *Session) State() SessionState {
 	return state
 }
 
+func (s *Session) AddPeerAddress(peerAddress *PeerAddress) {
+	s.connectToPeer(peerAddress)
+}
+
 func (s *Session) AddPeer(conn net.Conn, hs *handshake) error {
 	// Set 60 second limit to handshake attempt
 	conn.SetDeadline(time.Now().Add(time.Minute))
@@ -294,7 +305,8 @@ func (s *Session) AddPeer(conn net.Conn, hs *handshake) error {
 
 	s.swarm[peer.addr] = peer
 
-	go s.readFromPeer(peer)
+	go s.readErrorsFromPeer(peer)
+	go s.readMessagesFromPeer(peer)
 
 	return nil
 }
@@ -339,7 +351,13 @@ func (s *Session) connectToPeer(peerAddress *PeerAddress) {
 	}()
 }
 
-func (s *Session) readFromPeer(peer *Peer) {
+func (s *Session) readErrorsFromPeer(peer *Peer) {
+	for err := range peer.Errors {
+		s.errors <- stackerr.Wrap(err)
+	}
+}
+
+func (s *Session) readMessagesFromPeer(peer *Peer) {
 	for msg := range peer.Incoming {
 		switch msg := msg.(type) {
 		case *keepaliveMessage:
@@ -347,9 +365,13 @@ func (s *Session) readFromPeer(peer *Peer) {
 			peer.SetPeerChoking(true)
 		case *unchokeMessage:
 			peer.SetPeerChoking(false)
-			s.maybeQueuePieceRequests(peer)
+
+			if s.metainfo != nil {
+				s.maybeQueuePieceRequests(peer)
+			}
 		case *interestedMessage:
 			peer.SetPeerInterested(true)
+
 			if peer.SetAmChoking(false) {
 				peer.Outgoing <- &unchokeMessage{}
 			}
@@ -357,17 +379,33 @@ func (s *Session) readFromPeer(peer *Peer) {
 			peer.SetPeerInterested(false)
 		case *haveMessage:
 			pieceIndex := int(msg.pieceIndex)
-			if pieceIndex >= s.metainfo.PieceCount {
-				break
-			}
+
 			peer.MarkPieceComplete(pieceIndex)
-			s.swarmTally.AddIndex(pieceIndex)
-			s.maybeQueuePieceRequests(peer)
+
+			if s.metainfo != nil {
+				if pieceIndex >= s.metainfo.PieceCount {
+					break
+				}
+
+				s.swarmTally.AddIndex(pieceIndex)
+
+				if !s.blocks.Get(pieceIndex) {
+					s.maybeQueuePieceRequests(peer)
+				}
+			}
 		case *bitfieldMessage:
 			peer.SetBitfield(msg.blocks)
-			s.swarmTally.AddBitfield(msg.blocks)
-			s.maybeQueuePieceRequests(peer)
+
+			if s.metainfo != nil {
+				s.swarmTally.AddBitfield(msg.blocks)
+
+				s.maybeQueuePieceRequests(peer)
+			}
 		case *requestMessage:
+			if s.metainfo != nil {
+				break
+			}
+
 			if peer.GetAmChoking() || !s.blocks.Get(int(msg.pieceIndex)) || msg.blockLength > 32768 {
 				break
 			}
@@ -394,6 +432,10 @@ func (s *Session) readFromPeer(peer *Peer) {
 				if _, err := s.store.SetBlock(int(msg.pieceIndex), int64(msg.blockOffset), msg.data); err != nil {
 					s.errors <- stackerr.Wrap(err)
 				}
+			} else {
+				s.errors <- stackerr.New("peer sent us a piece that we didn't have a request for")
+
+				break
 			}
 
 			if peer.requestQueue.Len()+peer.requestsRunning.Len() == 0 {
@@ -421,11 +463,68 @@ func (s *Session) readFromPeer(peer *Peer) {
 					s.stateLock.Unlock()
 				}
 
-				s.maybeQueuePieceRequests(peer)
+				if s.metainfo != nil {
+					s.maybeQueuePieceRequests(peer)
+				}
 			} else {
 				peer.maybeSendPieceRequests()
 			}
 		// case *cancelMessage:
+		case *extendedHandshakeMessage:
+			for name, id := range msg.Messages {
+				peer.extensionIds[name] = id
+				peer.extensionNames[id] = name
+			}
+
+			if msg.Version != "" {
+				peer.version = msg.Version
+			}
+
+			if msg.YourIP != "" {
+				peer.reportedIp = msg.YourIP
+			}
+
+			if msg.RequestQueue != 0 {
+				peer.maxRequests = msg.RequestQueue
+			}
+
+			peer.Outgoing <- &extendedHandshakeMessage{
+				Messages: msg.Messages,
+			}
+
+			if id, ok := peer.extensionIds["ut_metadata"]; ok && msg.MetadataSize != 0 {
+				log.Printf("we can fetch metadata from this peer via message %d", id)
+
+				t := int(math.Ceil(float64(msg.MetadataSize) / 16384))
+
+				peer.metadataPieces = NewBitfield(nil, t)
+				peer.metadataContent = make([]byte, msg.MetadataSize)
+
+				for i := 0; i < t; i++ {
+					log.Printf("fetching piece %d", i)
+
+					peer.Outgoing <- &extendedUtMetadataMessage{
+						Type:  0,
+						Piece: i,
+					}
+				}
+			}
+		case *extendedUtMetadataMessage:
+			if msg.Type == 1 {
+				copy(peer.metadataContent[msg.Piece*16384:], msg.Data)
+
+				peer.metadataPieces.Set(msg.Piece, true)
+
+				if peer.metadataPieces.Sum() == peer.metadataPieces.Length() {
+					if metainfo, err := ParseInfoDict(peer.metadataContent); err != nil {
+						s.errors <- stackerr.Wrap(err)
+					} else if metainfo.InfoHash != s.InfoHash() {
+						s.errors <- stackerr.New("metadata received from peer didn't match info_hash")
+					} else {
+						s.SetMetainfo(metainfo)
+					}
+				}
+			}
 		default:
 		}
 	}
@@ -440,25 +539,43 @@ func (s *Session) maybeQueuePieceRequests(p *Peer) {
 		return
 	}
 
+	log.Printf("thinking about queuing some piece requests")
+
 	for i := 0; i < s.blocks.Length(); i++ {
-		// we don't have the full bitfield from this peer yet
-		if p.blocks.Length() <= i {
+		if s.blocks.Get(i) {
 			continue
 		}
 
-		if s.blocks.Get(i) || s.requesting.Get(i) || !p.blocks.Get(i) {
+		log.Printf("looking for piece %d", i)
+
+		// we don't have the full bitfield from this peer yet
+		if p.blocks.Length() <= i {
+			log.Printf("full bitfield not attained")
+			continue
+		}
+
+		if s.requesting.Get(i) {
+			log.Printf("we're already trying to get this piece")
+			continue
+		}
+
+		if !p.blocks.Get(i) {
+			log.Printf("they don't have it")
 			continue
 		}
 
 		if p.SetAmInterested(true) {
+			log.Printf("telling them we're interested")
 			p.Outgoing <- &interestedMessage{}
 		}
 
 		if p.GetPeerChoking() {
+			log.Printf("they're choking us")
 			break
 		}
 
 		if p.requestingBlock != -1 {
+			log.Printf("we're already requesting a block from them")
 			break
 		}
 

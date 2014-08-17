@@ -43,6 +43,10 @@ func main() {
 	log.Printf("peer id: %s", peerId)
 
 	c := libtorrent.Config{
+		InfoHash: [20]byte{
+			0x03, 0x8e, 0x14, 0x8c, 0x0e, 0x22, 0x40, 0xcf, 0x09, 0x05,
+			0x72, 0x2f, 0x29, 0x11, 0x52, 0xe2, 0xe2, 0xc7, 0xff, 0x84,
+		},
 		PeerId: peerId,
 		Port:   port,
 		StoreFactory: libtorrent.StoreFactory{
@@ -57,10 +61,6 @@ func main() {
 			},
 		},
 		PeerSourceFactories: []libtorrent.PeerSourceFactory{
-			// libtorrent.PeerSourceFactory{
-			// 	Constructor: nullsource.NewNullSource,
-			// 	Config:      nil,
-			// },
 			{
 				Constructor: trackers.NewTrackers,
 				Config: trackers.Config{
@@ -83,17 +83,17 @@ func main() {
 		},
 	}
 
-	f, err := os.Open(os.Args[1])
-	if err != nil {
-		log.Fatal(err)
-	}
+	// f, err := os.Open(os.Args[1])
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 
-	m, err := libtorrent.ParseMetainfo(f)
-	if err != nil {
-		log.Fatal(err)
-	}
+	// m, err := libtorrent.ParseMetainfo(f)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 
-	s, err := libtorrent.NewSession(m, &c)
+	s, err := libtorrent.NewSession(&c, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -108,13 +108,24 @@ func main() {
 
 	s.Start()
 
-	for {
-		if s.State() != libtorrent.STATE_LEARNING {
-			break
-		}
+	s.AddPeerAddress(&libtorrent.PeerAddress{
+		Host: "127.0.0.1",
+		Port: 51413,
+	})
 
-		time.Sleep(time.Second * 1)
+	if s.State() == libtorrent.STATE_LEARNING {
+		log.Printf("learning about torrent, need metadata")
+
+		for {
+			if s.State() != libtorrent.STATE_LEARNING {
+				break
+			}
+
+			time.Sleep(time.Second * 1)
+		}
 	}
+
+	log.Printf("beginning to download")
 
 	for {
 		if s.State() != libtorrent.STATE_LEECHING {

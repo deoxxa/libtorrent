@@ -15,13 +15,19 @@ type Peer struct {
 	Incoming chan interface{}
 	Outgoing chan binaryDumper
 
-	conn io.ReadWriter
 	addr string
+	conn io.ReadWriter
 
-	peerId        [20]byte
-	reserved      [8]byte
-	hasExtensions bool
-	extensions    map[int]string
+	peerId   [20]byte
+	reserved [8]byte
+
+	hasExtensions  bool
+	extensionIds   map[string]int
+	extensionNames map[int]string
+	version        string
+	reportedIp     string
+	reportedIpv4   [4]byte
+	reportedIpv6   [16]byte
 
 	amChoking      bool
 	amInterested   bool
@@ -36,6 +42,9 @@ type Peer struct {
 	requestingBlock int
 	requestQueue    c3.Queue
 	requestsRunning c3.Bag
+
+	metadataContent []byte
+	metadataPieces  *Bitfield
 }
 
 func NewPeer(addr string, hs *handshake, conn io.ReadWriter) (p *Peer) {
@@ -47,52 +56,54 @@ func NewPeer(addr string, hs *handshake, conn io.ReadWriter) (p *Peer) {
 		addr: addr,
 		conn: conn,
 
-		peerId:        hs.peerId,
-		hasExtensions: hs.flags.Get(44),
-		extensions:    map[int]string{},
+		peerId: hs.peerId,
+
+		hasExtensions:  hs.flags.Get(44),
+		extensionIds:   map[string]int{},
+		extensionNames: map[int]string{},
 
 		amChoking:      true,
 		amInterested:   false,
 		peerChoking:    true,
 		peerInterested: false,
 
-		maxRequests:     25,
+		maxRequests:     75,
 		requestingBlock: -1,
 		requestQueue:    c3.NewQueue(),
 		requestsRunning: c3.NewBag(),
 	}
 
-	// Write loop
-	go func() {
-		for {
-			var msg binaryDumper
-
-			select {
-			case _msg := <-p.Outgoing:
-				msg = _msg
-			case <-time.After(time.Second * 30):
-				msg = new(keepaliveMessage)
-			}
-
-			if err := msg.BinaryDump(conn); err != nil {
-				p.Errors <- stackerr.Wrap(err)
-				break
-			}
-		}
-	}()
-
-	// Read loop
-	go func() {
-		for {
-			if msg, err := parsePeerMessage(conn); err != nil {
-				p.Errors <- stackerr.Wrap(err)
-			} else {
-				p.Incoming <- msg
-			}
-		}
-	}()
+	go p.readMessages()
+	go p.writeMessages()
 
 	return
+}
+
+func (p *Peer) readMessages() {
+	for {
+		if msg, err := parsePeerMessage(p, p.conn); err != nil {
+			p.Errors <- stackerr.Wrap(err)
+		} else {
+			p.Incoming <- msg
+		}
+	}
+}
+
+func (p *Peer) writeMessages() {
+	for {
+		var msg binaryDumper
+
+		select {
+		case _msg := <-p.Outgoing:
+			msg = _msg
+		case <-time.After(time.Second * 30):
+			msg = new(keepaliveMessage)
+		}
+
+		if err := msg.BinaryDump(p, p.conn); err != nil {
+			p.Errors <- stackerr.Wrap(err)
+		}
+	}
 }
 
 func (p *Peer) GetAmChoking() (b bool) {
