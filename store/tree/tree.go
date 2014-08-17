@@ -5,8 +5,7 @@ import (
 	"io"
 
 	"github.com/facebookgo/stackerr"
-	"github.com/torrance/libtorrent/metainfo"
-	"github.com/torrance/libtorrent/store"
+	"github.com/torrance/libtorrent"
 )
 
 type NodeConstructor func(name string, length int64, config interface{}) (Node, error)
@@ -21,7 +20,7 @@ type Config struct {
 }
 
 type Tree struct {
-	*store.Base
+	*libtorrent.BaseStore
 
 	config Config
 	nodes  []Node
@@ -33,14 +32,14 @@ type Node interface {
 	Length() int64
 }
 
-func NewTree(m *metainfo.Metainfo, config interface{}) (store.Store, error) {
+func NewTree(m *libtorrent.Metainfo, config interface{}) (libtorrent.Store, error) {
 	c, ok := config.(Config)
 	if !ok {
 		return nil, errors.New("config must be a tree.Config")
 	}
 
 	t := &Tree{
-		Base: store.NewBase(m),
+		BaseStore: libtorrent.NewBaseStore(m),
 	}
 
 	for _, file := range m.Files {

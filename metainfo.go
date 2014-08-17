@@ -1,4 +1,4 @@
-package metainfo
+package libtorrent
 
 import (
 	"bytes"

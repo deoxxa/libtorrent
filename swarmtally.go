@@ -2,12 +2,11 @@ package libtorrent
 
 import (
 	"github.com/facebookgo/stackerr"
-	"github.com/torrance/libtorrent/bitfield"
 )
 
 type swarmTally []int
 
-func (st swarmTally) AddBitfield(bitf *bitfield.Bitfield) error {
+func (st swarmTally) AddBitfield(bitf *Bitfield) error {
 	if len(st) != bitf.Length() {
 		return stackerr.Newf("addBitfield: Supplied bitfield incorrect size, want %d, got %d", len(st), bitf.Length())
 	}
@@ -37,7 +36,7 @@ func (st swarmTally) AddIndex(i int) error {
 	return nil
 }
 
-func (st swarmTally) RemoveBitfield(bitf *bitfield.Bitfield) error {
+func (st swarmTally) RemoveBitfield(bitf *Bitfield) error {
 	if len(st) != bitf.Length() {
 		return stackerr.Newf("removeBitfield: Supplied bitfield incorrect size, want %d, got %d", len(st), bitf.Length())
 	}

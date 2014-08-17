@@ -1,4 +1,4 @@
-package bitfield
+package libtorrent
 
 import (
 	"bytes"

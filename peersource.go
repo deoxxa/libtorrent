@@ -1,9 +1,5 @@
 package libtorrent
 
-import (
-	"github.com/torrance/libtorrent/metainfo"
-)
-
 type PeerAddress struct {
 	Host string
 	Port uint16
@@ -15,7 +11,7 @@ type PeerSourceFactory struct {
 }
 
 type PeerSource interface {
-	Metainfo(m *metainfo.Metainfo) error
+	Metainfo(m *Metainfo) error
 	Errors() chan error
 	Peers() chan *PeerAddress
 	Start() error

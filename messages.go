@@ -9,19 +9,18 @@ import (
 	"math"
 
 	"github.com/facebookgo/stackerr"
-	"github.com/torrance/libtorrent/bitfield"
 )
 
 const (
-	Choke = uint8(iota)
-	Unchoke
-	Interested
-	Uninterested
-	Have
-	Bitfield
-	Request
-	Piece
-	Cancel
+	MESSAGE_CHOKE = uint8(iota)
+	MESSAGE_UNCHOKE
+	MESSAGE_INTERESTED
+	MESSAGE_UNINTERESTED
+	MESSAGE_HAVE
+	MESSAGE_BITFIELD
+	MESSAGE_REQUEST
+	MESSAGE_PIECE
+	MESSAGE_CANCEL
 )
 
 type binaryDumper interface {
@@ -30,7 +29,7 @@ type binaryDumper interface {
 
 type handshake struct {
 	protocol []byte
-	flags    *bitfield.Bitfield
+	flags    *Bitfield
 	infoHash [20]byte
 	peerId   [20]byte
 }
@@ -38,7 +37,7 @@ type handshake struct {
 func newHandshake(infoHash [20]byte, peerId [20]byte) (hs *handshake) {
 	return &handshake{
 		protocol: []byte("BitTorrent protocol"),
-		flags:    bitfield.NewBitfield(nil, 64),
+		flags:    NewBitfield(nil, 64),
 		infoHash: infoHash,
 		peerId:   peerId,
 	}
@@ -68,7 +67,7 @@ func parseHandshake(r io.Reader) (*handshake, error) {
 	if _, err := r.Read(reserved); err != nil {
 		return nil, stackerr.Wrap(err)
 	}
-	hs.flags = bitfield.NewBitfield(reserved, 64)
+	hs.flags = NewBitfield(reserved, 64)
 
 	// Info Hash
 	if _, err := r.Read(hs.infoHash[:]); err != nil {
@@ -131,21 +130,21 @@ func parsePeerMessage(r io.Reader) (interface{}, error) {
 	payloadReader := bytes.NewReader(payload)
 
 	switch id {
-	case Choke:
+	case MESSAGE_CHOKE:
 		return parseChokeMessage(payloadReader)
-	case Unchoke:
+	case MESSAGE_UNCHOKE:
 		return parseUnchokeMessage(payloadReader)
-	case Interested:
+	case MESSAGE_INTERESTED:
 		return parseInterestedMessage(payloadReader)
-	case Uninterested:
+	case MESSAGE_UNINTERESTED:
 		return parseUninterestedMessage(payloadReader)
-	case Have:
+	case MESSAGE_HAVE:
 		return parseHaveMessage(payloadReader)
-	case Bitfield:
+	case MESSAGE_BITFIELD:
 		return parseBitfieldMessage(payloadReader)
-	case Request:
+	case MESSAGE_REQUEST:
 		return parseRequestMessage(payloadReader)
-	case Piece:
+	case MESSAGE_PIECE:
 		return parsePieceMessage(payloadReader)
 	}
 
@@ -178,7 +177,7 @@ func parseChokeMessage(r io.Reader) (*chokeMessage, error) {
 func (msg *chokeMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(1))
-	mw.Write(Choke)
+	mw.Write(MESSAGE_CHOKE)
 
 	if mw.err == nil {
 		return nil
@@ -196,7 +195,7 @@ func parseUnchokeMessage(r io.Reader) (*unchokeMessage, error) {
 func (msg *unchokeMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(1))
-	mw.Write(Unchoke)
+	mw.Write(MESSAGE_UNCHOKE)
 
 	if mw.err == nil {
 		return nil
@@ -214,7 +213,7 @@ func parseInterestedMessage(r io.Reader) (*interestedMessage, error) {
 func (msg *interestedMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(1))
-	mw.Write(Interested)
+	mw.Write(MESSAGE_INTERESTED)
 	if mw.err == nil {
 		return nil
 	} else {
@@ -231,7 +230,7 @@ func parseUninterestedMessage(r io.Reader) (*uninterestedMessage, error) {
 func (msg *uninterestedMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(1))
-	mw.Write(Uninterested)
+	mw.Write(MESSAGE_UNINTERESTED)
 
 	if mw.err == nil {
 		return nil
@@ -259,7 +258,7 @@ func parseHaveMessage(r io.Reader) (*haveMessage, error) {
 func (msg *haveMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(5))
-	mw.Write(Have)
+	mw.Write(MESSAGE_HAVE)
 	mw.Write(msg.pieceIndex)
 	if mw.err == nil {
 		return nil
@@ -269,7 +268,7 @@ func (msg *haveMessage) BinaryDump(w io.Writer) error {
 }
 
 type bitfieldMessage struct {
-	blocks *bitfield.Bitfield
+	blocks *Bitfield
 }
 
 func parseBitfieldMessage(r io.Reader) (msg *bitfieldMessage, err error) {
@@ -277,7 +276,7 @@ func parseBitfieldMessage(r io.Reader) (msg *bitfieldMessage, err error) {
 		return nil, stackerr.Wrap(err)
 	} else {
 		msg = &bitfieldMessage{
-			blocks: bitfield.NewBitfield(data, len(data)*8),
+			blocks: NewBitfield(data, len(data)*8),
 		}
 
 		return msg, nil
@@ -287,7 +286,7 @@ func parseBitfieldMessage(r io.Reader) (msg *bitfieldMessage, err error) {
 func (msg *bitfieldMessage) BinaryDump(w io.Writer) error {
 	mw := monadWriter{w: w}
 	mw.Write(uint32(math.Ceil(float64(msg.blocks.Length())/8) + 1))
-	mw.Write(Bitfield)
+	mw.Write(MESSAGE_BITFIELD)
 	mw.Write(msg.blocks.Bytes())
 	if mw.err == nil {
 		return nil
@@ -321,8 +320,8 @@ func parseRequestMessage(r io.Reader) (msg *requestMessage, err error) {
 
 func (msg requestMessage) BinaryDump(w io.Writer) (err error) {
 	mw := &monadWriter{w: w}
-	mw.Write(uint32(13)) // Length: status + 12 byte payload
-	mw.Write(Request)    // Message id
+	mw.Write(uint32(13))      // Length: status + 12 byte payload
+	mw.Write(MESSAGE_REQUEST) // Message id
 	mw.Write(msg.pieceIndex)
 	mw.Write(msg.blockOffset)
 	mw.Write(msg.blockLength)
@@ -363,7 +362,7 @@ func (msg *pieceMessage) BinaryDump(w io.Writer) error {
 	length := uint32(len(msg.data) + 9)
 	mw := monadWriter{w: w}
 	mw.Write(length)
-	mw.Write(Piece)
+	mw.Write(MESSAGE_PIECE)
 	mw.Write(msg.pieceIndex)
 	mw.Write(msg.blockOffset)
 	mw.Write(msg.data)

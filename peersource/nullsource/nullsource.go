@@ -4,7 +4,6 @@ import (
 	"log"
 
 	"github.com/torrance/libtorrent"
-	"github.com/torrance/libtorrent/metainfo"
 )
 
 type NullSource struct {
@@ -23,7 +22,7 @@ func NewNullSource(s *libtorrent.Session, config interface{}) (libtorrent.PeerSo
 	return n, nil
 }
 
-func (s *NullSource) Metainfo(m *metainfo.Metainfo) error {
+func (s *NullSource) Metainfo(m *libtorrent.Metainfo) error {
 	log.Printf("metainfo provided")
 
 	return nil

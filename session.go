@@ -8,22 +8,7 @@ import (
 	"time"
 
 	"github.com/facebookgo/stackerr"
-	"github.com/torrance/libtorrent/bitfield"
-	"github.com/torrance/libtorrent/metainfo"
-	"github.com/torrance/libtorrent/store"
 )
-
-const (
-	STATE_STOPPED = iota
-	STATE_LEARNING
-	STATE_LEECHING
-	STATE_SEEDING
-)
-
-var ZERO_HASH = [20]byte{
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-}
 
 type Session struct {
 	errors chan error
@@ -43,11 +28,11 @@ type Session struct {
 	swarm      map[string]*Peer
 	swarmTally swarmTally
 
-	metainfo *metainfo.Metainfo
+	metainfo *Metainfo
 
-	store      store.Store
-	blocks     *bitfield.Bitfield
-	requesting *bitfield.Bitfield
+	store      Store
+	blocks     *Bitfield
+	requesting *Bitfield
 }
 
 type peerDouble struct {
@@ -55,7 +40,7 @@ type peerDouble struct {
 	msg  interface{}
 }
 
-func NewSession(m *metainfo.Metainfo, config *Config) (*Session, error) {
+func NewSession(m *Metainfo, config *Config) (*Session, error) {
 	s := &Session{
 		errors: make(chan error, 100),
 
@@ -161,7 +146,7 @@ func (s *Session) Left() int64 {
 	return s.Length() - s.Completed()
 }
 
-func (s *Session) SetMetainfo(m *metainfo.Metainfo) error {
+func (s *Session) SetMetainfo(m *Metainfo) error {
 	s.metainfo = m
 
 	if s.infoHash == ZERO_HASH {
@@ -174,13 +159,13 @@ func (s *Session) SetMetainfo(m *metainfo.Metainfo) error {
 		s.store = store
 	}
 
-	if blocks, err := store.Validate(s.store); err != nil {
+	if blocks, err := Validate(s.store); err != nil {
 		return stackerr.Wrap(err)
 	} else {
 		s.blocks = blocks
 	}
 
-	s.requesting = bitfield.NewBitfield(nil, s.blocks.Length())
+	s.requesting = NewBitfield(nil, s.blocks.Length())
 
 	if s.state == STATE_LEARNING {
 		s.state = STATE_LEECHING
@@ -444,7 +429,7 @@ func (s *Session) ReadFromPeer(peer *Peer) {
 			}
 
 			if peer.requestQueue.Len()+peer.requestsRunning.Len() == 0 {
-				if ok, err := store.ValidateBlock(s.store, peer.requestingBlock); err != nil {
+				if ok, err := ValidateBlock(s.store, peer.requestingBlock); err != nil {
 					s.errors <- stackerr.Wrap(err)
 				} else {
 					if ok {

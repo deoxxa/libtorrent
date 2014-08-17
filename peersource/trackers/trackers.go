@@ -5,7 +5,6 @@ import (
 
 	"github.com/facebookgo/stackerr"
 	"github.com/torrance/libtorrent"
-	"github.com/torrance/libtorrent/metainfo"
 	"github.com/torrance/libtorrent/tracker"
 )
 
@@ -39,7 +38,7 @@ func NewTrackers(s *libtorrent.Session, config interface{}) (libtorrent.PeerSour
 	return t, nil
 }
 
-func (s *Trackers) Metainfo(m *metainfo.Metainfo) error {
+func (s *Trackers) Metainfo(m *libtorrent.Metainfo) error {
 	for _, trackerUrl := range m.AnnounceList {
 		u, err := url.Parse(trackerUrl)
 		if err != nil {

@@ -9,10 +9,8 @@ import (
 
 	"github.com/funkygao/golib/profile"
 	"github.com/torrance/libtorrent"
-	"github.com/torrance/libtorrent/metainfo"
 	"github.com/torrance/libtorrent/peersource/nullsource"
 	"github.com/torrance/libtorrent/peersource/trackers"
-	"github.com/torrance/libtorrent/store"
 	"github.com/torrance/libtorrent/store/tree"
 	"github.com/torrance/libtorrent/tracker"
 	"github.com/torrance/libtorrent/tracker/http"
@@ -48,7 +46,7 @@ func main() {
 	c := libtorrent.Config{
 		PeerId: peerId,
 		Port:   port,
-		StoreFactory: store.Factory{
+		StoreFactory: libtorrent.StoreFactory{
 			Constructor: tree.NewTree,
 			Config: tree.Config{
 				NodeFactory: tree.NodeFactory{
@@ -91,7 +89,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	m, err := metainfo.ParseMetainfo(f)
+	m, err := libtorrent.ParseMetainfo(f)
 	if err != nil {
 		log.Fatal(err)
 	}

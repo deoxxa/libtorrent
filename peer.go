@@ -8,7 +8,6 @@ import (
 
 	"github.com/ReSc/c3"
 	"github.com/facebookgo/stackerr"
-	"github.com/torrance/libtorrent/bitfield"
 )
 
 type Peer struct {
@@ -31,7 +30,7 @@ type Peer struct {
 
 	mutex sync.RWMutex
 
-	blocks *bitfield.Bitfield
+	blocks *Bitfield
 
 	maxRequests     int
 	requestingBlock int
@@ -152,7 +151,7 @@ func (p *Peer) SetPeerInterested(b bool) {
 	p.mutex.Unlock()
 }
 
-func (p *Peer) SetBitfield(blocks *bitfield.Bitfield) {
+func (p *Peer) SetBitfield(blocks *Bitfield) {
 	p.mutex.Lock()
 	p.blocks = blocks
 	p.mutex.Unlock()
@@ -162,13 +161,13 @@ func (p *Peer) HasPiece(index int) {
 	p.mutex.Lock()
 
 	if p.blocks == nil {
-		p.blocks = bitfield.NewBitfield(nil, index)
+		p.blocks = NewBitfield(nil, index)
 	}
 
 	if p.blocks.Length() < index+1 {
 		d := make([]byte, int(math.Ceil(float64(index+1)/8)))
 		copy(d, p.blocks.Bytes())
-		p.blocks = bitfield.NewBitfield(d, index+1)
+		p.blocks = NewBitfield(d, index+1)
 	}
 
 	p.blocks.Set(index, true)
