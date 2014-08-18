@@ -21,35 +21,46 @@ type Transport struct {
 }
 
 func NewTransport(u *url.URL, config interface{}) (libtorrent.TrackerTransport, error) {
-	conn, err := net.Dial("udp", u.Host)
-	if err != nil {
-		return nil, stackerr.Wrap(err)
-	}
-
-	creq := &connectionRequest{transactionId: uint32(rand.Int31())}
-	if err = creq.BinaryDump(conn); err != nil {
-		return nil, stackerr.Wrap(err)
-	}
-
-	cres, err := parseConnectionResponse(conn)
-	if err != nil {
-		return nil, stackerr.Wrap(err)
-	} else if cres.transactionId != creq.transactionId {
-		return nil, stackerr.New("recieved transactionId did not match")
-	} else if cres.action != 0 {
-		return nil, stackerr.Newf("action is not set to connect (0), instead got %d", cres.action)
-	}
-
 	t := &Transport{
-		u:    u,
-		conn: conn,
-		cid:  cres.connectionId,
+		u: u,
 	}
 
 	return t, nil
 }
 
+func (u *Transport) Connect() error {
+	conn, err := net.Dial("udp", u.u.Host)
+	if err != nil {
+		return stackerr.Wrap(err)
+	}
+
+	creq := &connectionRequest{transactionId: uint32(rand.Int31())}
+	if err = creq.BinaryDump(conn); err != nil {
+		return stackerr.Wrap(err)
+	}
+
+	cres, err := parseConnectionResponse(conn)
+	if err != nil {
+		return stackerr.Wrap(err)
+	} else if cres.transactionId != creq.transactionId {
+		return stackerr.New("recieved transactionId did not match")
+	} else if cres.action != 0 {
+		return stackerr.Newf("action is not set to connect (0), instead got %d", cres.action)
+	}
+
+	u.conn = conn
+	u.cid = cres.connectionId
+
+	return nil
+}
+
 func (u *Transport) Announce(req *libtorrent.TrackerAnnounceRequest) (*libtorrent.TrackerAnnounceResponse, error) {
+	if u.conn == nil {
+		if err := u.Connect(); err != nil {
+			return nil, stackerr.Wrap(err)
+		}
+	}
+
 	areq := announceRequest{
 		connectionId:  u.cid,
 		transactionId: uint32(rand.Int31()),
