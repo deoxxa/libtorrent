@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"net/url"
 	"sync"
 	"time"
 
@@ -38,6 +39,7 @@ type Session struct {
 	stateLock sync.Mutex
 
 	peerSources []PeerSource
+	trackers    []*Tracker
 
 	connecting map[string]bool
 	swarm      map[string]*Peer
@@ -71,7 +73,13 @@ func NewSession(config *Config, m *Metainfo) (*Session, error) {
 		swarm:      map[string]*Peer{},
 	}
 
-	for _, peerSourceFactory := range config.PeerSourceFactories {
+	for _, trackerUrl := range config.Trackers {
+		if err := s.AddTracker(trackerUrl); err != nil {
+			return nil, stackerr.Wrap(err)
+		}
+	}
+
+	for _, peerSourceFactory := range config.PeerSources {
 		if peerSource, err := peerSourceFactory.Constructor(s, peerSourceFactory.Config); err != nil {
 			return nil, stackerr.Wrap(err)
 		} else {
@@ -123,8 +131,10 @@ func (s *Session) Name() string {
 func (s *Session) Length() int64 {
 	var r int64
 
-	for _, f := range s.metainfo.Files {
-		r += f.Length
+	if s.metainfo != nil {
+		for _, f := range s.metainfo.Files {
+			r += f.Length
+		}
 	}
 
 	return r
@@ -143,14 +153,16 @@ func (s *Session) Downloaded() int64 {
 func (s *Session) Completed() int64 {
 	var r int64
 
-	for i := 0; i < s.blocks.Length(); i++ {
-		if s.blocks.Get(i) {
-			if i == s.blocks.Length()-1 {
-				r += s.Length() % s.metainfo.PieceLength
-			} else {
-				r += s.metainfo.PieceLength
-			}
+	if s.blocks != nil {
+		for i := 0; i < s.blocks.Length(); i++ {
+			if s.blocks.Get(i) {
+				if i == s.blocks.Length()-1 {
+					r += s.Length() % s.metainfo.PieceLength
+				} else {
+					r += s.metainfo.PieceLength
+				}
 
+			}
 		}
 	}
 
@@ -190,7 +202,7 @@ func (s *Session) SetMetainfo(m *Metainfo) error {
 
 	for _, peerSource := range s.peerSources {
 		if err := peerSource.Metainfo(m); err != nil {
-			return stackerr.Wrap(err)
+			s.errors <- stackerr.Wrap(err)
 		}
 	}
 
@@ -205,6 +217,36 @@ func (s *Session) SetMetainfo(m *Metainfo) error {
 	for _, peer := range s.swarm {
 		s.maybeQueuePieceRequests(peer)
 	}
+
+	return nil
+}
+
+func (s *Session) AddTracker(trackerUrl string) error {
+	u, err := url.Parse(trackerUrl)
+	if err != nil {
+		return stackerr.Wrap(err)
+	}
+
+	transportFactory, ok := s.config.TrackerTransports[u.Scheme]
+	if !ok {
+		return stackerr.Newf("unrecognised tracker scheme %s for %s", u.Scheme, trackerUrl)
+	}
+
+	transport, err := transportFactory.Constructor(u, transportFactory.Config)
+	if err != nil {
+		return stackerr.Wrap(err)
+	}
+
+	tracker, err := NewTracker(transport, s)
+	if err != nil {
+		return stackerr.Wrap(err)
+	}
+
+	if err := s.AddPeerSource(tracker); err != nil {
+		return stackerr.Wrap(err)
+	}
+
+	s.trackers = append(s.trackers, tracker)
 
 	return nil
 }
@@ -252,7 +294,7 @@ func (s *Session) Start() error {
 
 	for _, peerSource := range s.peerSources {
 		if err := peerSource.Start(); err != nil {
-			return stackerr.Wrap(err)
+			s.errors <- stackerr.Wrap(err)
 		}
 	}
 
@@ -265,6 +307,12 @@ func (s *Session) Stop() error {
 	s.stateLock.Lock()
 	s.state = STATE_STOPPED
 	s.stateLock.Unlock()
+
+	for _, peerSource := range s.peerSources {
+		if err := peerSource.Stop(); err != nil {
+			s.errors <- stackerr.Wrap(err)
+		}
+	}
 
 	return nil
 }
@@ -397,7 +445,7 @@ func (s *Session) readMessagesFromPeer(peer *Peer) {
 
 				s.swarmTally.AddIndex(pieceIndex)
 
-				if !s.blocks.Get(pieceIndex) {
+				if s.blocks != nil && !s.blocks.Get(pieceIndex) {
 					s.maybeQueuePieceRequests(peer)
 				}
 			}
@@ -523,7 +571,7 @@ func (s *Session) readMessagesFromPeer(peer *Peer) {
 
 				peer.metadataPieces.Set(msg.Piece, true)
 
-				if peer.metadataPieces.Sum() == peer.metadataPieces.Length() {
+				if peer.metadataPieces.Sum() == peer.metadataPieces.Length() && s.metainfo == nil {
 					if metainfo, err := ParseInfoDict(peer.metadataContent); err != nil {
 						s.errors <- stackerr.Wrap(err)
 					} else if metainfo.InfoHash != s.InfoHash() {
@@ -547,43 +595,37 @@ func (s *Session) maybeQueuePieceRequests(p *Peer) {
 		return
 	}
 
-	log.Printf("thinking about queuing some piece requests")
+	if s.blocks == nil {
+		return
+	}
 
 	for i := 0; i < s.blocks.Length(); i++ {
 		if s.blocks.Get(i) {
 			continue
 		}
 
-		log.Printf("looking for piece %d", i)
-
 		// we don't have the full bitfield from this peer yet
 		if p.blocks.Length() <= i {
-			log.Printf("full bitfield not attained")
 			continue
 		}
 
 		if s.requesting.Get(i) {
-			log.Printf("we're already trying to get this piece")
 			continue
 		}
 
 		if !p.blocks.Get(i) {
-			log.Printf("they don't have it")
 			continue
 		}
 
 		if p.SetAmInterested(true) {
-			log.Printf("telling them we're interested")
 			p.Outgoing <- &interestedMessage{}
 		}
 
 		if p.GetPeerChoking() {
-			log.Printf("they're choking us")
 			break
 		}
 
 		if p.requestingBlock != -1 {
-			log.Printf("we're already requesting a block from them")
 			break
 		}
 

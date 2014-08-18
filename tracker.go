@@ -67,6 +67,10 @@ type Tracker struct {
 	next  time.Duration
 }
 
+func (s *Tracker) Metainfo(m *Metainfo) error {
+	return nil
+}
+
 func (t *Tracker) Errors() chan error {
 	return t.errors
 }
@@ -92,7 +96,7 @@ func NewTracker(transport TrackerTransport, subject Trackable) (*Tracker, error)
 	return t, nil
 }
 
-func (t *Tracker) Start() {
+func (t *Tracker) Start() error {
 	t.next = 0
 
 	event := EVENT_STARTED
@@ -152,8 +156,12 @@ func (t *Tracker) Start() {
 			t.errors <- stackerr.Wrap(err)
 		}
 	}()
+
+	return nil
 }
 
-func (t *Tracker) Stop() {
+func (t *Tracker) Stop() error {
 	t.stop <- true
+
+	return nil
 }

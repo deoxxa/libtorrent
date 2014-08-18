@@ -1,16 +1,19 @@
 package main
 
 import (
+	"encoding/base32"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"math/rand"
+	"net/url"
 	"os"
 	"time"
 
 	"github.com/funkygao/golib/profile"
 	"github.com/torrance/libtorrent"
 	// "github.com/torrance/libtorrent/peersource/nullsource"
-	"github.com/torrance/libtorrent/peersource/trackers"
+	// "github.com/torrance/libtorrent/peersource/trackers"
 	"github.com/torrance/libtorrent/store/tree"
 	"github.com/torrance/libtorrent/tracker/http"
 	"github.com/torrance/libtorrent/tracker/udp"
@@ -43,10 +46,6 @@ func main() {
 	log.Printf("peer id: %s", peerId)
 
 	c := libtorrent.Config{
-		InfoHash: [20]byte{
-			0x03, 0x8e, 0x14, 0x8c, 0x0e, 0x22, 0x40, 0xcf, 0x09, 0x05,
-			0x72, 0x2f, 0x29, 0x11, 0x52, 0xe2, 0xe2, 0xc7, 0xff, 0x84,
-		},
 		PeerId: peerId,
 		Port:   port,
 		StoreFactory: libtorrent.StoreFactory{
@@ -60,40 +59,80 @@ func main() {
 				},
 			},
 		},
-		PeerSourceFactories: []libtorrent.PeerSourceFactory{
-			{
-				Constructor: trackers.NewTrackers,
-				Config: trackers.Config{
-					Transports: map[string]libtorrent.TrackerTransportFactory{
-						"http": {
-							Constructor: http.NewTransport,
-							Config:      nil,
-						},
-						"https": {
-							Constructor: http.NewTransport,
-							Config:      nil,
-						},
-						"udp": {
-							Constructor: udp.NewTransport,
-							Config:      nil,
-						},
-					},
-				},
+		PeerSources: []libtorrent.PeerSourceFactory{},
+		TrackerTransports: map[string]libtorrent.TrackerTransportFactory{
+			"http": {
+				Constructor: http.NewTransport,
+				Config:      nil,
+			},
+			"https": {
+				Constructor: http.NewTransport,
+				Config:      nil,
+			},
+			"udp": {
+				Constructor: udp.NewTransport,
+				Config:      nil,
 			},
 		},
+		Trackers: []string{},
 	}
 
-	// f, err := os.Open(os.Args[1])
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
+	var m *libtorrent.Metainfo
 
-	// m, err := libtorrent.ParseMetainfo(f)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
+	u, err := url.Parse(os.Args[1])
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	s, err := libtorrent.NewSession(&c, nil)
+	switch u.Scheme {
+	case "":
+		f, err := os.Open(u.Path)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		m, err = libtorrent.ParseMetainfo(f)
+		if err != nil {
+			log.Fatal(err)
+		}
+	case "magnet":
+		xt := u.Query().Get("xt")
+		if len(xt) < 9 {
+			log.Fatal("malformed magnet uri")
+		}
+
+		if xt[0:9] != "urn:btih:" {
+			log.Fatal("unsupported exact topic form in magnet uri, expected urn:btih")
+		}
+
+		var infoHash []byte
+
+		if len(xt) == 41 {
+			infoHash, err = base32.StdEncoding.DecodeString(xt[9:])
+			if err != nil {
+				log.Fatal(err)
+			}
+		} else if len(xt) == 49 {
+			infoHash, err = hex.DecodeString(xt[9:])
+			if err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			log.Fatal("malformed exact topic value")
+		}
+
+		copy(c.InfoHash[:], infoHash)
+
+		c.Name = u.Query().Get("dn")
+
+		if tr, ok := u.Query()["tr"]; ok {
+			c.Trackers = append(c.Trackers, tr...)
+		}
+	default:
+		log.Fatal("can't interpret url")
+	}
+
+	s, err := libtorrent.NewSession(&c, m)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -107,11 +146,6 @@ func main() {
 	l.AddSession(s)
 
 	s.Start()
-
-	s.AddPeerAddress(&libtorrent.PeerAddress{
-		Host: "127.0.0.1",
-		Port: 51413,
-	})
 
 	if s.State() == libtorrent.STATE_LEARNING {
 		log.Printf("learning about torrent, need metadata")
