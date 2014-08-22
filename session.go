@@ -129,8 +129,8 @@ func (s *Session) Name() string {
 	}
 }
 
-func (s *Session) Length() int64 {
-	var r int64
+func (s *Session) Length() uint64 {
+	var r uint64
 
 	if s.metainfo != nil {
 		for _, f := range s.metainfo.Files {
@@ -141,18 +141,18 @@ func (s *Session) Length() int64 {
 	return r
 }
 
-func (s *Session) Uploaded() int64 {
+func (s *Session) Uploaded() uint64 {
 	// TODO:
 	return 0
 }
 
-func (s *Session) Downloaded() int64 {
+func (s *Session) Downloaded() uint64 {
 	// TODO:
 	return 0
 }
 
-func (s *Session) Completed() int64 {
-	var r int64
+func (s *Session) Completed() uint64 {
+	var r uint64
 
 	if s.blocks != nil {
 		for i := 0; i < s.blocks.Length(); i++ {
@@ -170,7 +170,7 @@ func (s *Session) Completed() int64 {
 	return r
 }
 
-func (s *Session) Left() int64 {
+func (s *Session) Left() uint64 {
 	return s.Length() - s.Completed()
 }
 

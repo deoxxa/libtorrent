@@ -54,8 +54,8 @@ func validate(s Store) (*Bitfield, error) {
 
 type BaseStore struct {
 	hashes      [][20]byte
-	pieceLength int64
-	totalLength int64
+	pieceLength uint64
+	totalLength uint64
 }
 
 func NewBaseStore(metainfo *Metainfo) *BaseStore {
@@ -75,7 +75,7 @@ func (s *BaseStore) Blocks() int {
 	return len(s.hashes)
 }
 
-func (s *BaseStore) GetSize(index int) int64 {
+func (s *BaseStore) GetSize(index int) uint64 {
 	if index == len(s.hashes)-1 {
 		l := s.totalLength % s.pieceLength
 
@@ -97,6 +97,6 @@ func (s *BaseStore) GetHash(index int) (hash [20]byte, err error) {
 	}
 }
 
-func (s *BaseStore) GetOffset(index int) int64 {
-	return s.pieceLength * int64(index)
+func (s *BaseStore) GetOffset(index int) uint64 {
+	return s.pieceLength * uint64(index)
 }

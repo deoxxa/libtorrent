@@ -17,9 +17,9 @@ type Trackable interface {
 	PeerId() [20]byte
 	IP() [4]byte
 	Port() uint16
-	Uploaded() int64
-	Downloaded() int64
-	Left() int64
+	Uploaded() uint64
+	Downloaded() uint64
+	Left() uint64
 }
 
 type Event byte
@@ -37,9 +37,9 @@ type TrackerAnnounceRequest struct {
 	PeerId     [20]byte
 	IP         [4]byte
 	Port       uint16
-	Uploaded   int64
-	Downloaded int64
-	Left       int64
+	Uploaded   uint64
+	Downloaded uint64
+	Left       uint64
 }
 
 type TrackerAnnounceResponse struct {

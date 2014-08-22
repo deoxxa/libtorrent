@@ -15,21 +15,21 @@ type Metainfo struct {
 	AnnounceList []string
 	Pieces       [][20]byte
 	PieceCount   int
-	PieceLength  int64
+	PieceLength  uint64
 	InfoHash     [20]byte
 	Files        []struct {
-		Length int64
+		Length uint64
 		Path   string
 	}
 }
 
 type InfoDict struct {
-	Length      int64
+	Length      uint64
 	Name        string
 	Pieces      []byte
-	PieceLength int64 `bencode:"piece length"`
+	PieceLength uint64 `bencode:"piece length"`
 	Files       []struct {
-		Length int64
+		Length uint64
 		Path   []string
 	}
 }
@@ -65,7 +65,7 @@ func ParseInfoDict(b []byte) (*Metainfo, error) {
 	// Single files and multiple files are stored differently. We normalise these into
 	// a single description
 	type file struct {
-		Length int64
+		Length uint64
 		Path   string
 	}
 	if len(infoDict.Files) == 0 && infoDict.Length != 0 {
@@ -147,7 +147,7 @@ func ParseMetainfo(r io.Reader) (*Metainfo, error) {
 	// Single files and multiple files are stored differently. We normalise these into
 	// a single description
 	type file struct {
-		Length int64
+		Length uint64
 		Path   string
 	}
 	if len(metaDecode.Info.Files) == 0 && metaDecode.Info.Length != 0 {
