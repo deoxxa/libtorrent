@@ -7,11 +7,11 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/facebookgo/stackerr"
 	"github.com/deoxxa/libtorrent"
 	"github.com/deoxxa/libtorrent/store/tree"
 	"github.com/deoxxa/libtorrent/tracker/http"
 	"github.com/deoxxa/libtorrent/tracker/udp"
+	"github.com/facebookgo/stackerr"
 	"github.com/wsxiaoys/terminal/color"
 )
 
