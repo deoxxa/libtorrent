@@ -67,7 +67,7 @@ type Tracker struct {
 	next  time.Duration
 }
 
-func (s *Tracker) Metainfo(m *Metainfo) error {
+func (t *Tracker) Metainfo(metainfo *Metainfo) error {
 	return nil
 }
 

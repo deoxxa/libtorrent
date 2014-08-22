@@ -266,6 +266,7 @@ func (msg *haveMessage) BinaryDump(p *Peer, w io.Writer) error {
 	mw.Write(uint32(5))
 	mw.Write(MESSAGE_HAVE)
 	mw.Write(msg.pieceIndex)
+
 	if mw.err == nil {
 		return nil
 	} else {
@@ -399,11 +400,23 @@ func parseExtendedMessage(p *Peer, r io.Reader) (interface{}, error) {
 	}
 
 	switch messageName {
+	case "upload_only":
+		return parseExtendedUploadOnlyMessage(p, r)
+	case "lt_tex":
+		return parseExtendedLtTrackerExchangeMessage(p, r)
+	case "ut_holepunch":
+		return parseExtendedUtHolepunchMessage(p, r)
 	case "ut_metadata":
 		return parseExtendedUtMetadataMessage(p, r)
+	case "ut_pex":
+		return parseExtendedUtPeerExchangeMessage(p, r)
 	}
 
-	return nil, stackerr.Newf("unknown extended message type: %s (%d)", messageName, messageId)
+	if data, err := ioutil.ReadAll(r); err != nil {
+		return nil, stackerr.Wrap(err)
+	} else {
+		return nil, stackerr.Newf("unknown extended message type: %s (%d) (%#v)", messageName, messageId, data)
+	}
 }
 
 type extendedMessage struct {
@@ -416,8 +429,8 @@ type extendedHandshakeMessage struct {
 	Port         int            `bencode:"p"`
 	Version      string         `bencode:"v"`
 	YourIP       string         `bencode:"yourip"`
-	IPV4         [4]byte        `bencode:"ipv4"`
-	IPV6         [16]byte       `bencode:"ipv6"`
+	IPV4         []byte         `bencode:"ipv4"`
+	IPV6         []byte         `bencode:"ipv6"`
 	RequestQueue int            `bencode:"reqq"`
 	MetadataSize int            `bencode:"metadata_size"`
 }
@@ -451,6 +464,127 @@ func (msg *extendedHandshakeMessage) BinaryDump(p *Peer, w io.Writer) error {
 	} else {
 		return stackerr.Wrap(mw.err)
 	}
+}
+
+type extendedUploadOnlyMessage struct {
+	UploadOnly bool
+}
+
+func parseExtendedUploadOnlyMessage(p *Peer, r io.Reader) (*extendedUploadOnlyMessage, error) {
+	var uploadOnly byte
+	mr := monadReader{r: r}
+	mr.Read(&uploadOnly)
+
+	msg := &extendedUploadOnlyMessage{
+		UploadOnly: uploadOnly != 0,
+	}
+
+	if mr.err != nil {
+		return nil, stackerr.Wrap(mr.err)
+	} else {
+		return msg, nil
+	}
+}
+
+func (msg *extendedUploadOnlyMessage) BinaryDump(p *Peer, w io.Writer) error {
+	messageId, ok := p.extensionIds["upload_only"]
+	if !ok {
+		return stackerr.Newf("peer doesn't understand upload_only messages")
+	}
+
+	mw := monadWriter{w: w}
+	mw.Write(3)
+	mw.Write(MESSAGE_EXTENDED)
+	mw.Write(uint8(messageId))
+	mw.Write(msg.UploadOnly)
+
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
+}
+
+type extendedLtTrackerExchangeMessage struct {
+	Added []string `bencode:"added"`
+}
+
+func parseExtendedLtTrackerExchangeMessage(p *Peer, r io.Reader) (*extendedLtTrackerExchangeMessage, error) {
+	var m extendedLtTrackerExchangeMessage
+	d := bencode.NewDecoder(r)
+	if err := d.Decode(&m); err != nil {
+		return nil, stackerr.Wrap(err)
+	}
+
+	return &m, nil
+}
+
+func (msg *extendedLtTrackerExchangeMessage) BinaryDump(p *Peer, w io.Writer) error {
+	messageId, ok := p.extensionIds["lt_tex"]
+	if !ok {
+		return stackerr.Newf("peer doesn't understand lt_tex messages")
+	}
+
+	data, err := bencode.EncodeString(msg)
+	if err != nil {
+		return stackerr.Wrap(err)
+	}
+
+	length := uint32(2 + len(data))
+
+	mw := monadWriter{w: w}
+	mw.Write(length)
+	mw.Write(MESSAGE_EXTENDED)
+	mw.Write(uint8(messageId))
+	mw.Write([]byte(data))
+
+	if mw.err == nil {
+		return nil
+	} else {
+		return stackerr.Wrap(mw.err)
+	}
+}
+
+type extendedUtHolepunchMessage struct {
+	MessageType byte
+	AddressType byte
+	IPV4        [4]byte
+	IPV6        [16]byte
+	Port        uint16
+}
+
+func parseExtendedUtHolepunchMessage(p *Peer, r io.Reader) (*extendedUtHolepunchMessage, error) {
+	msg := &extendedUtHolepunchMessage{}
+
+	mr := monadReader{r: r}
+	mr.Read(&msg.MessageType)
+	mr.Read(&msg.AddressType)
+
+	switch msg.AddressType {
+	case 0:
+		mr.Read(msg.IPV4[:])
+	case 1:
+		mr.Read(msg.IPV6[:])
+	default:
+		return nil, stackerr.Newf("invalid address type: %d", msg.AddressType)
+	}
+
+	mr.Read(&msg.Port)
+
+	if mr.err != nil {
+		return nil, stackerr.Wrap(mr.err)
+	} else {
+		return msg, nil
+	}
+}
+
+func (msg *extendedUtHolepunchMessage) BinaryDump(p *Peer, w io.Writer) error {
+	_, ok := p.extensionIds["ut_holepunch"]
+	if !ok {
+		return stackerr.Newf("peer doesn't understand upload_only messages")
+	}
+
+	return stackerr.New("unimplemented")
 }
 
 type extendedUtMetadataMessage struct {
@@ -505,6 +639,76 @@ func (msg *extendedUtMetadataMessage) BinaryDump(p *Peer, w io.Writer) error {
 	} else {
 		return stackerr.Wrap(mw.err)
 	}
+}
+
+type extendedUtPeerExchangeMessage struct {
+	AddedRaw   []byte        `bencode:"added"`
+	DroppedRaw []byte        `bencode:"dropped"`
+	Added      []PeerAddress `bencode:"-"`
+	Dropped    []PeerAddress `bencode:"-"`
+}
+
+func parseExtendedUtPeerExchangeMessage(p *Peer, r io.Reader) (*extendedUtPeerExchangeMessage, error) {
+	var m extendedUtPeerExchangeMessage
+	d := bencode.NewDecoder(r)
+	if err := d.Decode(&m); err != nil {
+		return nil, stackerr.Wrap(err)
+	}
+
+	if len(m.AddedRaw)%6 != 0 {
+		return nil, stackerr.New("added field was the wrong size")
+	}
+
+	if len(m.DroppedRaw)%6 != 0 {
+		return nil, stackerr.New("dropped field was the wrong size")
+	}
+
+	addedBuffer := bytes.NewBuffer([]byte(m.AddedRaw))
+
+	for i := 0; i < len(m.AddedRaw)/6; i++ {
+		var a, b, c, d byte
+		var port uint16
+
+		binary.Read(addedBuffer, binary.BigEndian, &a)
+		binary.Read(addedBuffer, binary.BigEndian, &b)
+		binary.Read(addedBuffer, binary.BigEndian, &c)
+		binary.Read(addedBuffer, binary.BigEndian, &d)
+		binary.Read(addedBuffer, binary.BigEndian, &port)
+
+		m.Added = append(m.Added, PeerAddress{
+			Host: fmt.Sprintf("%d.%d.%d.%d", a, b, c, d),
+			Port: port,
+		})
+	}
+
+	droppedBuffer := bytes.NewBuffer([]byte(m.DroppedRaw))
+
+	for i := 0; i < len(m.DroppedRaw)/6; i++ {
+		var a, b, c, d byte
+		var port uint16
+
+		binary.Read(droppedBuffer, binary.BigEndian, &a)
+		binary.Read(droppedBuffer, binary.BigEndian, &b)
+		binary.Read(droppedBuffer, binary.BigEndian, &c)
+		binary.Read(droppedBuffer, binary.BigEndian, &d)
+		binary.Read(droppedBuffer, binary.BigEndian, &port)
+
+		m.Dropped = append(m.Dropped, PeerAddress{
+			Host: fmt.Sprintf("%d.%d.%d.%d", a, b, c, d),
+			Port: port,
+		})
+	}
+
+	return &m, nil
+}
+
+func (msg *extendedUtPeerExchangeMessage) BinaryDump(p *Peer, w io.Writer) error {
+	_, ok := p.extensionIds["ut_pex"]
+	if !ok {
+		return stackerr.Newf("peer doesn't understand ut_pex messages")
+	}
+
+	return stackerr.New("unimplemented")
 }
 
 type unknownMessage struct {

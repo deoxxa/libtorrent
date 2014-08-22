@@ -1,8 +1,8 @@
 package libtorrent
 
 import (
+	"bytes"
 	"fmt"
-	"log"
 	"math"
 	"net"
 	"net/url"
@@ -21,13 +21,9 @@ const (
 	STATE_SEEDING
 )
 
-var ZERO_HASH = [20]byte{
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-}
-
 type Session struct {
-	errors chan error
+	errors   chan error
+	messages chan string
 
 	config *Config
 
@@ -57,9 +53,10 @@ type peerDouble struct {
 	msg  interface{}
 }
 
-func NewSession(config *Config, m *Metainfo) (*Session, error) {
+func NewSession(config *Config) (*Session, error) {
 	s := &Session{
-		errors: make(chan error, 100),
+		errors:   make(chan error, 100),
+		messages: make(chan string, 100),
 
 		config: config,
 
@@ -89,8 +86,8 @@ func NewSession(config *Config, m *Metainfo) (*Session, error) {
 		}
 	}
 
-	if m != nil {
-		if err := s.SetMetainfo(m); err != nil {
+	if config.Metainfo != nil {
+		if err := s.SetMetainfo(config.Metainfo); err != nil {
 			return nil, stackerr.Wrap(err)
 		}
 	}
@@ -100,6 +97,10 @@ func NewSession(config *Config, m *Metainfo) (*Session, error) {
 
 func (s *Session) Errors() chan error {
 	return s.errors
+}
+
+func (s *Session) Messages() chan string {
+	return s.messages
 }
 
 func (s *Session) InfoHash() [20]byte {
@@ -173,14 +174,14 @@ func (s *Session) Left() int64 {
 	return s.Length() - s.Completed()
 }
 
-func (s *Session) SetMetainfo(m *Metainfo) error {
-	s.metainfo = m
+func (s *Session) SetMetainfo(metainfo *Metainfo) error {
+	s.metainfo = metainfo
 
-	if s.infoHash == ZERO_HASH {
-		s.infoHash = m.InfoHash
+	if s.infoHash == [20]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} {
+		s.infoHash = metainfo.InfoHash
 	}
 
-	if store, err := s.config.StoreFactory.Constructor(m, s.config.StoreFactory.Config); err != nil {
+	if store, err := s.config.StoreFactory.Constructor(metainfo, s.config.StoreFactory.Config); err != nil {
 		return stackerr.Wrap(err)
 	} else {
 		s.store = store
@@ -201,7 +202,7 @@ func (s *Session) SetMetainfo(m *Metainfo) error {
 	}
 
 	for _, peerSource := range s.peerSources {
-		if err := peerSource.Metainfo(m); err != nil {
+		if err := peerSource.Metainfo(metainfo); err != nil {
 			s.errors <- stackerr.Wrap(err)
 		}
 	}
@@ -215,6 +216,7 @@ func (s *Session) SetMetainfo(m *Metainfo) error {
 	}
 
 	for _, peer := range s.swarm {
+		peer.maybeCancelMetadataRequests()
 		s.maybeQueuePieceRequests(peer)
 	}
 
@@ -268,7 +270,7 @@ func (s *Session) AddPeerSource(peerSource PeerSource) error {
 
 	go func() {
 		for addr := range peerSource.Peers() {
-			s.connectToPeer(addr)
+			s.AddPeerAddress(addr)
 		}
 	}()
 
@@ -326,7 +328,11 @@ func (s *Session) State() SessionState {
 }
 
 func (s *Session) AddPeerAddress(peerAddress *PeerAddress) {
-	s.connectToPeer(peerAddress)
+	if s.state == STATE_STOPPED || s.state == STATE_SEEDING {
+		return
+	}
+
+	go s.ConnectToPeer(peerAddress)
 }
 
 func (s *Session) AddPeer(conn net.Conn, hs *handshake) error {
@@ -359,7 +365,7 @@ func (s *Session) AddPeer(conn net.Conn, hs *handshake) error {
 
 	conn.SetDeadline(time.Time{})
 
-	s.swarm[peer.addr] = peer
+	s.swarm[peer.Addr()] = peer
 
 	go s.readErrorsFromPeer(peer)
 	go s.readMessagesFromPeer(peer)
@@ -372,39 +378,33 @@ func (s *Session) RemovePeer(peer *Peer) error {
 		s.requesting.Set(peer.requestingBlock, false)
 	}
 
-	delete(s.swarm, peer.addr)
+	delete(s.swarm, peer.Addr())
 
 	return nil
 }
 
-func (s *Session) connectToPeer(peerAddress *PeerAddress) {
-	if s.state == STATE_STOPPED || s.state == STATE_SEEDING {
-		return
-	}
-
+func (s *Session) ConnectToPeer(peerAddress *PeerAddress) error {
 	p := fmt.Sprintf("%s:%d", peerAddress.Host, peerAddress.Port)
 
 	if _, ok := s.swarm[p]; ok {
-		return
+		return stackerr.New("already connected to this peer")
 	}
 
 	if _, ok := s.connecting[p]; ok {
-		return
+		return stackerr.New("already connecting to this peer")
 	}
 
 	s.connecting[p] = true
 
-	go func() {
-		defer func() {
-			delete(s.connecting, p)
-		}()
+	defer delete(s.connecting, p)
 
-		if conn, err := net.Dial("tcp", p); err != nil {
-			s.errors <- stackerr.Wrap(err)
-		} else if err := s.AddPeer(conn, nil); err != nil {
-			s.errors <- stackerr.Wrap(err)
-		}
-	}()
+	if conn, err := net.Dial("tcp", p); err != nil {
+		return stackerr.Wrap(err)
+	} else if err := s.AddPeer(conn, nil); err != nil {
+		return stackerr.Wrap(err)
+	}
+
+	return nil
 }
 
 func (s *Session) readErrorsFromPeer(peer *Peer) {
@@ -540,6 +540,14 @@ func (s *Session) readMessagesFromPeer(peer *Peer) {
 				peer.reportedIp = msg.YourIP
 			}
 
+			if !bytes.Equal(msg.IPV4, []byte{0, 0, 0, 0}) {
+				copy(peer.reportedIpv4[:], msg.IPV4)
+			}
+
+			if !bytes.Equal(msg.IPV6, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}) {
+				copy(peer.reportedIpv6[:], msg.IPV6)
+			}
+
 			if msg.RequestQueue != 0 {
 				peer.maxRequests = msg.RequestQueue
 			}
@@ -548,25 +556,23 @@ func (s *Session) readMessagesFromPeer(peer *Peer) {
 				Messages: msg.Messages,
 			}
 
-			if id, ok := peer.extensionIds["ut_metadata"]; ok && msg.MetadataSize != 0 && s.metainfo == nil {
-				log.Printf("trying to fetch metadata from peer via message %d", id)
-
+			if _, ok := peer.extensionIds["ut_metadata"]; ok && msg.MetadataSize != 0 && s.metainfo == nil {
 				t := int(math.Ceil(float64(msg.MetadataSize) / 16384))
 
 				peer.metadataPieces = NewBitfield(nil, t)
 				peer.metadataContent = make([]byte, msg.MetadataSize)
 
 				for i := 0; i < t; i++ {
-					log.Printf("fetching piece %d", i)
-
-					peer.Outgoing <- &extendedUtMetadataMessage{
+					peer.metadataQueue.Enqueue(&extendedUtMetadataMessage{
 						Type:  0,
 						Piece: i,
-					}
+					})
 				}
+
+				peer.maybeSendMetadataRequests()
 			}
 		case *extendedUtMetadataMessage:
-			if msg.Type == 1 {
+			if msg.Type == 1 && peer.metadataContent != nil && s.metainfo == nil {
 				copy(peer.metadataContent[msg.Piece*16384:], msg.Data)
 
 				peer.metadataPieces.Set(msg.Piece, true)
@@ -579,9 +585,22 @@ func (s *Session) readMessagesFromPeer(peer *Peer) {
 					} else {
 						s.SetMetainfo(metainfo)
 					}
+
+					peer.maybeCancelMetadataRequests()
+				} else {
+					peer.maybeSendMetadataRequests()
 				}
 			}
-		default:
+		case *extendedUploadOnlyMessage:
+			peer.uploadOnly = msg.UploadOnly
+		case *extendedUtPeerExchangeMessage:
+			for _, peerAddress := range msg.Added {
+				s.AddPeerAddress(&peerAddress)
+			}
+		case *extendedLtTrackerExchangeMessage:
+			for _, trackerUrl := range msg.Added {
+				s.AddTracker(trackerUrl)
+			}
 		}
 	}
 
@@ -590,8 +609,8 @@ func (s *Session) readMessagesFromPeer(peer *Peer) {
 	}
 }
 
-func (s *Session) maybeQueuePieceRequests(p *Peer) {
-	if p.blocks == nil {
+func (s *Session) maybeQueuePieceRequests(peer *Peer) {
+	if peer.blocks == nil {
 		return
 	}
 
@@ -605,7 +624,7 @@ func (s *Session) maybeQueuePieceRequests(p *Peer) {
 		}
 
 		// we don't have the full bitfield from this peer yet
-		if p.blocks.Length() <= i {
+		if peer.blocks.Length() <= i {
 			continue
 		}
 
@@ -613,35 +632,33 @@ func (s *Session) maybeQueuePieceRequests(p *Peer) {
 			continue
 		}
 
-		if !p.blocks.Get(i) {
+		if !peer.blocks.Get(i) {
 			continue
 		}
 
-		if p.SetAmInterested(true) {
-			p.Outgoing <- &interestedMessage{}
+		if peer.SetAmInterested(true) {
+			peer.Outgoing <- &interestedMessage{}
 		}
 
-		if p.GetPeerChoking() {
+		if peer.GetPeerChoking() {
 			break
 		}
 
-		if p.requestingBlock != -1 {
+		if peer.requestingBlock != -1 {
 			break
 		}
 
 		s.requesting.Set(i, true)
-		p.requestingBlock = i
-
-		log.Printf("requesting block %d from peer %s", p.requestingBlock, p.peerId)
+		peer.requestingBlock = i
 
 		for o := 0; o < int(s.metainfo.PieceLength/8192); o++ {
-			p.requestQueue.Enqueue(&requestMessage{
+			peer.requestQueue.Enqueue(&requestMessage{
 				pieceIndex:  uint32(i),
 				blockOffset: uint32(o * 8192),
 				blockLength: 8192,
 			})
 		}
 
-		p.maybeSendPieceRequests()
+		peer.maybeSendPieceRequests()
 	}
 }

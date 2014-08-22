@@ -58,13 +58,13 @@ type BaseStore struct {
 	totalLength int64
 }
 
-func NewBaseStore(m *Metainfo) *BaseStore {
+func NewBaseStore(metainfo *Metainfo) *BaseStore {
 	b := &BaseStore{
-		hashes:      m.Pieces,
-		pieceLength: m.PieceLength,
+		hashes:      metainfo.Pieces,
+		pieceLength: metainfo.PieceLength,
 	}
 
-	for _, file := range m.Files {
+	for _, file := range metainfo.Files {
 		b.totalLength += file.Length
 	}
 

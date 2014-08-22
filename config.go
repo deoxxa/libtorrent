@@ -10,4 +10,5 @@ type Config struct {
 	PeerSources       []PeerSourceFactory
 	TrackerTransports map[string]TrackerTransportFactory
 	Trackers          []string
+	Metainfo          *Metainfo
 }

@@ -47,6 +47,10 @@ type Peer struct {
 
 	metadataContent []byte
 	metadataPieces  *Bitfield
+	metadataQueue   c3.Queue
+	metadataRunning c3.Bag
+
+	uploadOnly bool
 }
 
 func NewPeer(addr string, hs *handshake, conn io.ReadWriter) (p *Peer) {
@@ -75,6 +79,9 @@ func NewPeer(addr string, hs *handshake, conn io.ReadWriter) (p *Peer) {
 		requestingBlock: -1,
 		requestQueue:    c3.NewQueue(),
 		requestsRunning: c3.NewBag(),
+
+		metadataQueue:   c3.NewQueue(),
+		metadataRunning: c3.NewBag(),
 	}
 
 	go p.readMessages()
@@ -83,46 +90,8 @@ func NewPeer(addr string, hs *handshake, conn io.ReadWriter) (p *Peer) {
 	return
 }
 
-func (p *Peer) readMessages() {
-	for {
-		if msg, err := parsePeerMessage(p, p.conn); err != nil {
-			p.Errors <- stackerr.Wrap(err)
-
-			e := stackerr.Underlying(err)
-			if e != nil && e[len(e)-1] == io.EOF {
-				break
-			}
-		} else {
-			p.Incoming <- msg
-		}
-	}
-
-	p.kill <- true
-
-	close(p.Errors)
-	close(p.Incoming)
-}
-
-func (p *Peer) writeMessages() {
-LOOP:
-	for {
-		var msg binaryDumper
-
-		select {
-		case _msg := <-p.Outgoing:
-			msg = _msg
-		case <-time.After(time.Second * 30):
-			msg = new(keepaliveMessage)
-		case <-p.kill:
-			break LOOP
-		}
-
-		if err := msg.BinaryDump(p, p.conn); err != nil {
-			p.Errors <- stackerr.Wrap(err)
-		}
-	}
-
-	close(p.Outgoing)
+func (p *Peer) Addr() string {
+	return p.addr
 }
 
 func (p *Peer) GetAmChoking() (b bool) {
@@ -162,10 +131,12 @@ func (p *Peer) GetPeerChoking() (b bool) {
 	return
 }
 
-func (p *Peer) SetPeerChoking(b bool) {
+func (p *Peer) SetPeerChoking(b bool) (changed bool) {
 	p.mutex.Lock()
+	changed = p.peerChoking != b
 	p.peerChoking = b
 	p.mutex.Unlock()
+	return
 }
 
 func (p *Peer) GetPeerInterested() (b bool) {
@@ -175,10 +146,12 @@ func (p *Peer) GetPeerInterested() (b bool) {
 	return
 }
 
-func (p *Peer) SetPeerInterested(b bool) {
+func (p *Peer) SetPeerInterested(b bool) (changed bool) {
 	p.mutex.Lock()
+	changed = p.peerInterested != b
 	p.peerInterested = b
 	p.mutex.Unlock()
+	return
 }
 
 func (p *Peer) SetBitfield(blocks *Bitfield) {
@@ -205,6 +178,48 @@ func (p *Peer) MarkPieceComplete(index int) {
 	p.mutex.Unlock()
 }
 
+func (p *Peer) readMessages() {
+	for {
+		if msg, err := parsePeerMessage(p, p.conn); err != nil {
+			e := stackerr.Underlying(err)
+			if e != nil && e[len(e)-1] == io.EOF {
+				break
+			}
+
+			p.Errors <- stackerr.Wrap(err)
+		} else {
+			p.Incoming <- msg
+		}
+	}
+
+	p.kill <- true
+
+	close(p.Errors)
+	close(p.Incoming)
+}
+
+func (p *Peer) writeMessages() {
+LOOP:
+	for {
+		var msg binaryDumper
+
+		select {
+		case _msg := <-p.Outgoing:
+			msg = _msg
+		case <-time.After(time.Second * 30):
+			msg = new(keepaliveMessage)
+		case <-p.kill:
+			break LOOP
+		}
+
+		if err := msg.BinaryDump(p, p.conn); err != nil {
+			p.Errors <- stackerr.Wrap(err)
+		}
+	}
+
+	close(p.Outgoing)
+}
+
 func (p *Peer) maybeSendPieceRequests() {
 	p.mutex.Lock()
 
@@ -227,6 +242,42 @@ func (p *Peer) maybeSendPieceRequests() {
 
 		p.Outgoing <- r
 	}
+
+	p.mutex.Unlock()
+}
+
+func (p *Peer) maybeSendMetadataRequests() {
+	p.mutex.Lock()
+
+	for {
+		if p.metadataRunning.Len() >= 3 {
+			break
+		}
+
+		rr, ok := p.metadataQueue.Dequeue()
+		if !ok {
+			break
+		}
+
+		r, ok := rr.(*extendedUtMetadataMessage)
+		if !ok {
+			break
+		}
+
+		p.metadataRunning.Add(*r)
+
+		p.Outgoing <- r
+	}
+
+	p.mutex.Unlock()
+}
+
+func (p *Peer) maybeCancelMetadataRequests() {
+	p.mutex.Lock()
+
+	p.metadataQueue.Clear()
+	p.metadataPieces = nil
+	p.metadataContent = nil
 
 	p.mutex.Unlock()
 }
