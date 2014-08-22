@@ -5,7 +5,7 @@ import (
 	"io"
 
 	"github.com/facebookgo/stackerr"
-	"github.com/torrance/libtorrent"
+	"github.com/deoxxa/libtorrent"
 )
 
 type NodeConstructor func(name string, length int64, config interface{}) (Node, error)

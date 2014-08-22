@@ -4,7 +4,7 @@ import (
 	"net/url"
 
 	"github.com/facebookgo/stackerr"
-	"github.com/torrance/libtorrent"
+	"github.com/deoxxa/libtorrent"
 )
 
 type Config struct {

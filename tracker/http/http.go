@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/facebookgo/stackerr"
-	"github.com/torrance/libtorrent"
+	"github.com/deoxxa/libtorrent"
 	"github.com/zeebo/bencode"
 )
 

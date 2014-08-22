@@ -1,7 +1,7 @@
 package libtorrent
 
 import (
-	"github.com/torrance/libtorrent/bitfield"
+	"github.com/deoxxa/libtorrent/bitfield"
 	"testing"
 )
 

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/facebookgo/stackerr"
-	"github.com/torrance/libtorrent"
+	"github.com/deoxxa/libtorrent"
 )
 
 type Transport struct {

@@ -3,7 +3,7 @@ package nullsource
 import (
 	"log"
 
-	"github.com/torrance/libtorrent"
+	"github.com/deoxxa/libtorrent"
 )
 
 type NullSource struct {
